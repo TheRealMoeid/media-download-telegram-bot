@@ -2,11 +2,13 @@
 
 A modular Python Telegram bot for downloading videos from supported platforms and sending them back to users.
 
+> **Status:** Phase 0 — Planning & Architecture. No implementation exists yet; this document describes the intended design. See [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md) for the full phased development plan and rationale.
+
 ## Core behavior
 
 - **Instagram:** automatically download the best available quality without intentionally reducing it.
-- **YouTube:** inspect the available qualities and let the user choose which quality to download.
-- **Language:** on the user's first `/start`, show a **Persian / English** language-selection menu, remember the choice, and allow the user to change it later.
+- **YouTube:** inspect the available qualities for the specific video and let the user choose. If a video only exposes one quality, the bot skips the menu, downloads it automatically, and tells the user only one quality was available.
+- **Language:** on the user's first `/start`, show a **Persian / English** language-selection menu, remember the choice per Telegram user, and allow it to be changed later.
 
 ---
 
@@ -17,7 +19,7 @@ The bot should:
 1. Receive a video URL from a Telegram user.
 2. Detect the supported platform.
 3. Download Instagram videos at the best available quality.
-4. Inspect YouTube formats and let the user choose a quality.
+4. Inspect YouTube formats and let the user choose a quality (or auto-download when only one exists).
 5. Download media using `yt-dlp`.
 6. Use FFmpeg when streams need to be merged or processed.
 7. Send the resulting video back to the user.
@@ -85,7 +87,7 @@ Interface updates
 
 ### Instagram
 
-The bot should automatically select the **best available quality provided by Instagram**, without intentionally lowering the quality.
+The bot automatically selects the **best available quality provided by Instagram**, without intentionally lowering it.
 
 ```text
 Instagram URL
@@ -114,9 +116,11 @@ Cleanup
 
 The bot cannot create a quality that Instagram did not provide.
 
+Instagram content sometimes requires authentication to extract reliably. Phase 1 uses **anonymous `yt-dlp` extraction only**; the architecture leaves room for optional cookie/session-based authentication in a later phase. Any such credentials would be handled as configuration/secrets (via `.env`), never hardcoded or echoed back to users.
+
 ### YouTube
 
-The bot should inspect the actual formats available for the specific video and show the user the available quality choices.
+The bot inspects the actual formats available for the specific video and shows the user the available quality choices.
 
 ```text
 YouTube URL
@@ -128,22 +132,35 @@ Detect YouTube
 Extract available formats
       |
       v
-Build quality menu
+Only one quality available?
       |
-      v
-User selects quality
-      |
-      v
-Download selected quality
-      |
-      v
-FFmpeg if required
-      |
-      v
-Send video
-      |
-      v
-Cleanup
+   +--+----------------+
+   |                    |
+  Yes                   No
+   |                    |
+   v                    v
+Auto-download it   Build quality menu
+   |                    |
+   |                    v
+   |             User selects quality
+   |                    |
+   +--------+-----------+
+            |
+            v
+   Notify user which quality
+   was used (auto or chosen)
+            |
+            v
+       Download
+            |
+            v
+     FFmpeg if required
+            |
+            v
+       Send video
+            |
+            v
+        Cleanup
 ```
 
 For example, one video might offer:
@@ -156,53 +173,55 @@ For example, one video might offer:
 [ 480p       ]
 ```
 
-while another might only offer 1080p, 720p, and 480p. Only actually available choices should be displayed.
+while another might only offer a single quality — in which case the bot downloads it directly and informs the user no choice was necessary. Only actually available choices are ever displayed.
 
 ---
 
-## 4. Recommended Python Stack
+## 4. Technology Stack
 
-| Component | Library / Tool | Purpose |
+| Component | Library / Tool | Version / Notes |
 |---|---|---|
-| Telegram bot | `python-telegram-bot` | Telegram Bot API and update handling |
-| Video downloading | `yt-dlp` | Extract media information and download supported videos |
-| Video processing | `FFmpeg` | Merging, remuxing, conversion, and post-processing |
-| Configuration | `python-dotenv` | Load environment variables from `.env` |
+| Language runtime | Python | 3.14.4 |
+| Telegram bot | `python-telegram-bot` | Handles Telegram Bot API and update processing |
+| Video downloading | `yt-dlp` | Pinned at `2026.8.19` in `requirements.txt`; extracts media info and downloads supported videos |
+| Video processing | FFmpeg | External system binary (not a Python package); merging, remuxing, conversion |
+| Configuration | `python-dotenv` | Loads environment variables from `.env` |
+| User preference storage | SQLite | Backs `services/language_service.py` starting in Phase 1 |
+| Testing | `pytest`, `pytest-asyncio` | `unittest.mock` (stdlib) isolates Telegram/yt-dlp/FFmpeg in tests; no real network calls in the standard suite |
+| Logging | stdlib `logging` | Basic in Phase 1, expanded in Phase 2 |
 | Async HTTP | Built into `python-telegram-bot` | Network communication |
 
-FFmpeg is an external executable, not a normal Python package.
+FFmpeg must be installed and available on the host's `PATH`. The application is expected to validate this at startup and fail fast with a clear error if FFmpeg is missing, rather than discovering the problem mid-download.
 
 ---
 
 ## 5. Project Structure
 
+This reflects the actual repository layout — a flat structure at the repo root, not nested under an `app/` package.
+
 ```text
 telegram-video-downloader/
 |
-├── app/
+├── bot/
 │   ├── __init__.py
-│   ├── main.py
-│   |
-│   ├── bot/
-│   │   ├── __init__.py
-│   │   ├── handlers.py
-│   │   └── keyboards.py
-│   |
-│   ├── downloader/
-│   │   ├── __init__.py
-│   │   ├── youtube.py
-│   │   ├── instagram.py
-│   │   └── manager.py
-│   |
-│   ├── services/
-│   │   ├── __init__.py
-│   │   ├── video_service.py
-│   │   ├── file_service.py
-│   │   └── language_service.py
-│   |
-│   └── config/
-│       ├── __init__.py
-│       └── settings.py
+│   ├── handlers.py
+│   └── keyboards.py
+|
+├── downloader/
+│   ├── __init__.py
+│   ├── youtube.py
+│   ├── instagram.py
+│   └── manager.py
+|
+├── services/
+│   ├── __init__.py
+│   ├── video_service.py
+│   ├── file_service.py
+│   └── language_service.py
+|
+├── config/
+│   ├── __init__.py
+│   └── settings.py
 │
 ├── downloads/
 │   └── .gitkeep
@@ -222,6 +241,9 @@ telegram-video-downloader/
 ├── .gitignore
 ├── requirements.txt
 ├── README.md
+├── PROJECT_ROADMAP.md
+├── docs/
+│   └── PROJECT_ROADMAP.md   # intentional mirrored copy; root file is canonical
 └── run.py
 ```
 
@@ -232,24 +254,24 @@ telegram-video-downloader/
 | File / Folder | Responsibility |
 |---|---|
 | `run.py` | Application entry point |
-| `app/main.py` | Create/configure/start Telegram application |
-| `app/bot/handlers.py` | Telegram commands, URLs, callbacks, user interactions |
-| `app/bot/keyboards.py` | Language, settings, and YouTube quality keyboards |
-| `app/downloader/youtube.py` | YouTube format inspection and selected-quality downloading |
-| `app/downloader/instagram.py` | Instagram best-available-quality downloading |
-| `app/downloader/manager.py` | Select appropriate platform downloader |
-| `app/services/video_service.py` | Main download workflow/business logic |
-| `app/services/file_service.py` | Temporary file management and cleanup |
-| `app/services/language_service.py` | Get/set/remember user language |
-| `app/config/settings.py` | Configuration and environment variables |
+| `bot/handlers.py` | Telegram commands, URLs, callbacks, user interactions |
+| `bot/keyboards.py` | Language, settings, and YouTube quality keyboards |
+| `downloader/youtube.py` | YouTube format inspection and selected-/single-quality downloading |
+| `downloader/instagram.py` | Instagram best-available-quality downloading |
+| `downloader/manager.py` | Selects the appropriate platform downloader |
+| `services/video_service.py` | Main download workflow / business logic |
+| `services/file_service.py` | Temporary file management and cleanup |
+| `services/language_service.py` | Get/set/remember user language; the only module that touches language storage (SQLite in Phase 1) |
+| `config/settings.py` | Configuration and environment variables, including FFmpeg-path/startup-check settings |
 | `downloads/` | Temporary downloaded media |
 | `logs/` | Application logs |
-| `tests/` | Automated tests |
-| `.env` | Secrets such as Telegram bot token |
+| `tests/` | Automated tests (`pytest` + `pytest-asyncio`) |
+| `.env` | Secrets such as the Telegram bot token |
 | `.env.example` | Safe environment-variable template |
-| `.gitignore` | Ignore secrets, temporary files, caches, etc. |
-| `requirements.txt` | Python dependencies |
-| `README.md` | Project documentation |
+| `.gitignore` | Ignores secrets, temporary files, caches, etc. |
+| `requirements.txt` | Python dependencies (including the pinned `yt-dlp` version) |
+| `README.md` | This file |
+| `PROJECT_ROADMAP.md` | Canonical, phase-by-phase development plan (mirrored at `docs/PROJECT_ROADMAP.md`) |
 
 ---
 
@@ -262,9 +284,7 @@ Initial supported languages:
 | `fa` | Persian / فارسی |
 | `en` | English |
 
-The language preference should be associated with the Telegram user's ID.
-
-Conceptually:
+The language preference is associated with the Telegram user's ID and stored in SQLite (Phase 1), accessed only through `language_service.py`:
 
 ```text
 Telegram User ID
@@ -273,22 +293,24 @@ Telegram User ID
 Language Service
       |
       v
-User Preference Storage
+SQLite (user_id -> language)
       |
       v
 fa / en
 ```
 
-The rest of the application should use a small interface such as:
+The rest of the application uses a small interface such as:
 
 ```text
 get_language(user_id)
 set_language(user_id, language)
 ```
 
-Handlers should not directly manage the underlying storage.
+Handlers never manage the underlying storage directly.
 
-A centralized translation system should also be used so translated strings are not scattered throughout the codebase.
+### Translations
+
+A centralized translation service resolves a stable **message key** plus the user's language code to localized text (e.g., `translate("download.started", lang="fa")`). The underlying storage format for the translated strings themselves — Python dict, JSON, YAML, or otherwise — is an implementation detail decided during Phase 1, not fixed here. What's fixed is the interface: callers ask for a message by key and language, never by embedding raw strings in handlers.
 
 ---
 
@@ -307,9 +329,7 @@ Example:
 987654321 -> en
 ```
 
-The persistence implementation should be isolated behind `language_service.py`.
-
-This allows the project to start with simple storage and later migrate to a proper database without rewriting the Telegram UI or business logic.
+Phase 1 stores this in **SQLite**. The persistence implementation stays isolated behind `language_service.py`, so the project can later migrate to a different database without rewriting the Telegram UI or business logic.
 
 ---
 
@@ -337,8 +357,8 @@ This allows the project to start with simple storage and later migrate to a prop
                     |                           |
                     v                           v
           +-------------------+       +-------------------+
-          | User Preference   |       | Downloader Manager|
-          | Storage           |       +---------+---------+
+          | SQLite            |       | Downloader Manager|
+          | (user_id -> lang) |       +---------+---------+
           +-------------------+                 |
                                   +-------------+-------------+
                                   |                           |
@@ -379,17 +399,20 @@ This allows the project to start with simple storage and later migrate to a prop
 
 ---
 
-# 10. Phase 1 — MVP
+## 10. Phase 1 — MVP
 
-Phase 1 establishes the first complete working vertical slice.
+Phase 1 establishes the first complete working vertical slice. See `PROJECT_ROADMAP.md` for the full phase-by-phase plan; this section only summarizes what Phase 1 covers.
 
-## Phase 1 workflow
+### Phase 1 workflow
 
 ```text
 FIRST /START
      |
      v
-Check language preference
+Validate FFmpeg is on PATH (fail fast if missing)
+     |
+     v
+Check language preference (SQLite)
      |
   +--+------------------+
   |                     |
@@ -427,47 +450,56 @@ Detect platform
 Extract qualities         Best available
       |                    quality
       v                         |
-Show quality menu              |
-      |                         |
-      v                         |
-User selects quality            |
-      |                         |
-      +------------+------------+
-                   |
-                   v
-               Download
-                   |
-                   v
+One quality only?               |
+  |         |                   |
+ Yes        No                  |
+  |         |                   |
+  v         v                   |
+Auto-DL   Show menu             |
+  |         |                   |
+  |         v                   |
+  |     User selects            |
+  |     quality                 |
+  |         |                   |
+  +----+----+                   |
+       |                        |
+       +------------+-----------+
+                    |
+                    v
+                Download
+                    |
+                    v
           FFmpeg if required
-                   |
-                   v
+                    |
+                    v
              Send video
-                   |
-                   v
+                    |
+                    v
                Cleanup
 ```
 
-## Phase 1 includes
+### Phase 1 includes
 
 - Telegram bot initialization.
 - `/start`.
+- Startup FFmpeg availability check.
 - First-time language selection.
 - Persian and English.
-- Persistent language preference.
+- Persistent language preference (SQLite).
 - Ability to change language.
 - Basic URL validation.
 - YouTube detection.
 - Instagram detection.
-- Instagram best-available-quality download.
+- Instagram best-available-quality download (anonymous extraction).
 - YouTube available-quality extraction.
-- YouTube quality-selection menu.
+- YouTube quality-selection menu, with auto-download + notification when only one quality exists.
 - YouTube selected-quality download.
 - FFmpeg integration when required.
 - Sending videos to Telegram.
 - Temporary file cleanup.
-- Basic error handling.
+- Basic error handling and basic logging.
 
-## Not the focus of Phase 1
+### Not the focus of Phase 1
 
 - Large-scale production queues.
 - Distributed workers.
@@ -475,81 +507,24 @@ User selects quality            |
 - Payment/subscription system.
 - Download history.
 - Analytics.
-- Many additional platforms.
+- Additional platforms beyond YouTube/Instagram.
+- Instagram cookie/session authentication (architecture allows for it later; not implemented yet).
 - Advanced media editing.
 - Production scaling.
 
 ---
 
-## 11. Phase 1 Success Criteria
-
-### Language
-
-- [ ] `/start` detects a first-time user.
-- [ ] First-time users receive Persian/English selection.
-- [ ] Selected language is persisted.
-- [ ] Returning users automatically use their saved language.
-- [ ] Users can change language later.
-- [ ] Buttons and messages use the selected language.
-
-### Instagram
-
-- [ ] Instagram URL is detected.
-- [ ] Best available quality is selected automatically.
-- [ ] Quality is not intentionally reduced.
-- [ ] Video is sent to the user.
-- [ ] Temporary files are removed.
-
-### YouTube
-
-- [ ] YouTube URL is detected.
-- [ ] Available qualities are extracted.
-- [ ] Only available qualities are displayed.
-- [ ] User can select a quality.
-- [ ] Selected quality is downloaded.
-- [ ] FFmpeg merges streams when required.
-- [ ] Video is sent to the user.
-- [ ] Temporary files are removed.
-
-### Reliability
-
-- [ ] Invalid URLs are handled.
-- [ ] Unsupported URLs are handled.
-- [ ] Download errors do not crash the bot.
-- [ ] Secrets are loaded from `.env`.
-- [ ] Temporary media is excluded from Git.
-
----
-
-## 12. Development Strategy
-
-Build the project incrementally:
-
-1. **Project foundation** — structure, configuration, dependencies, logging.
-2. **Language system** — first-time selection, persistence, and switching.
-3. **Telegram URL handling** — receive and validate URLs.
-4. **Instagram downloader** — best available quality.
-5. **YouTube format extraction** — inspect actual available formats.
-6. **YouTube quality menu** — let the user choose.
-7. **Selected-quality download** — download according to the choice.
-8. **FFmpeg integration** — merge/process streams when necessary.
-9. **Telegram upload** — send the result.
-10. **Cleanup and error handling** — clean temporary files even after failures.
-11. **Testing and refactoring** — verify the complete flow and keep responsibilities separated.
-
----
-
-## 13. Design Principles
+## 11. Design Principles
 
 ### Separation of concerns
 
 ```text
 Bot layer          -> Telegram communication
-Language service   -> User language preferences
-Service layer      -> Application/business logic
-Downloader layer   -> Platform-specific media acquisition
-File service       -> Filesystem management
-Configuration      -> Environment/application settings
+Language service   -> User language preferences (SQLite-backed)
+Service layer       -> Application/business logic
+Downloader layer     -> Platform-specific media acquisition
+File service          -> Filesystem management
+Configuration          -> Environment/application settings, FFmpeg check
 ```
 
 ### Platform-specific quality behavior
@@ -557,6 +532,7 @@ Configuration      -> Environment/application settings
 ```text
 Instagram -> Best available automatically
 YouTube   -> User chooses from actual available qualities
+             (auto-downloads + notifies when only one exists)
 ```
 
 ### Don't assume YouTube qualities
@@ -569,19 +545,23 @@ Select the best suitable quality exposed by the source.
 
 ### Keep language logic centralized
 
-Translations and language selection should not be scattered through handlers.
+Translations and language selection are not scattered through handlers; both go through `language_service.py` and the translation lookup.
 
 ### Abstract preference storage
 
-The application should use language-service methods rather than directly manipulating storage.
+The application uses `language_service.py` methods rather than directly manipulating SQLite elsewhere.
 
 ### Secrets never belong in source code
 
-Use `.env`.
+Use `.env`. This includes any future Instagram authentication credentials.
 
 ### Temporary files are disposable
 
-Downloaded media should be deleted after the operation unless a future feature explicitly requires persistent storage.
+Downloaded media is deleted after the operation unless a future feature explicitly requires persistent storage.
+
+### Fail fast on missing dependencies
+
+FFmpeg availability is validated at startup, not discovered mid-download.
 
 ### Build a vertical slice first
 
@@ -589,122 +569,6 @@ Get the complete user flow working before adding complex infrastructure.
 
 ---
 
-## 14. Future Evolution
+## 12. Further Reading
 
-```text
-PHASE 1
-Language + Instagram + YouTube
-        |
-        v
-PHASE 2
-Better UI + validation + error handling
-        |
-        v
-PHASE 3
-Additional platforms + media options
-        |
-        v
-PHASE 4
-Queue + workers + concurrency control
-        |
-        v
-PHASE 5
-Database + history + user management
-        |
-        v
-Production deployment and scaling
-```
-
-The exact phase boundaries can evolve as requirements become clearer.
-
----
-
-## 15. Final Architecture
-
-```text
-+-----------------------------------------------------------+
-|                       TELEGRAM USER                       |
-+------------------------------+----------------------------+
-                               |
-                               v
-+-----------------------------------------------------------+
-|                    BOT / UI LAYER                         |
-|             handlers.py / keyboards.py                    |
-+-------------------+-------------------+-------------------+
-                    |                   |
-                    v                   v
-        +-------------------+   +-------------------------+
-        | LANGUAGE SERVICE  |   |      VIDEO SERVICE      |
-        | fa / en           |   | URL -> platform ->     |
-        | preferences       |   | download -> processing  |
-        +---------+---------+   +------------+------------+
-                  |                          |
-                  v                          v
-        +-------------------+   +-------------------------+
-        | Preference        |   | DOWNLOADER MANAGER      |
-        | Persistence       |   +------------+------------+
-        +-------------------+                |
-                                  +----------+----------+
-                                  |                     |
-                                  v                     v
-                           +-------------+       +-------------+
-                           |   YouTube   |       |  Instagram  |
-                           | User picks  |       | Best quality|
-                           | quality     |       | automatically|
-                           +------+------+       +------+------+
-                                  |                     |
-                                  +----------+----------+
-                                             |
-                                             v
-                                        +---------+
-                                        | yt-dlp  |
-                                        +----+----+
-                                             |
-                                             v
-                                        +---------+
-                                        | FFmpeg  |
-                                        +----+----+
-                                             |
-                                             v
-                                        +---------+
-                                        |  File   |
-                                        | Service |
-                                        +----+----+
-                                             |
-                                             v
-                                        +---------+
-                                        |Telegram |
-                                        | Upload  |
-                                        +----+----+
-                                             |
-                                             v
-                                          Cleanup
-```
-
----
-
-## 16. Current Project Definition
-
-**Project:** Telegram Video Downloader Bot
-
-**Initial languages:** Persian (`fa`) and English (`en`)
-
-**First-time behavior:** Show language-selection menu after `/start`.
-
-**Language persistence:** Remember the selected language per Telegram user.
-
-**Language switching:** Users can change their language whenever they want.
-
-**Instagram policy:** Best available quality automatically.
-
-**YouTube policy:** User chooses from qualities actually available for that video.
-
-**Downloader:** `yt-dlp`
-
-**Media processor:** FFmpeg
-
-**Telegram framework:** `python-telegram-bot`
-
-**Configuration:** `python-dotenv`
-
-**Primary Phase 1 goal:** Build and verify the complete end-to-end experience, including persistent language selection and platform-specific download behavior.
+For the full phased roadmap — including why each phase exists, what to learn, task checklists, and AI development rules for this repository — see [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md).
