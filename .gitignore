@@ -97,3 +97,5 @@ dist/
 
 *.sqlite3
 *.db
+
+*.png

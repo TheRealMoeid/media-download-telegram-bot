@@ -4,6 +4,8 @@
 > **Purpose:** Define the complete development path of the Telegram Video Downloader Bot so that the developer and AI assistants always understand what each phase is trying to accomplish, why it exists, what must be learned, and what must be completed before moving forward.
 >
 > **Important:** This document intentionally contains **no implementation code**. It is a project-planning document.
+>
+> **Canonical copy:** This file (`PROJECT_ROADMAP.md`, repository root) is the canonical version. A mirrored copy exists at `docs/PROJECT_ROADMAP.md` intentionally (e.g., for docs-site tooling). When the two differ, this root copy is authoritative, and the `docs/` copy should be updated to match it.
 
 ---
 
@@ -135,6 +137,23 @@ Focus only on the concepts required to understand this project:
 - [ ] Confirm the YouTube quality-selection policy.
 - [ ] Confirm the Persian/English language behavior.
 
+## Phase 0 — Finalized Technical Decisions
+
+These decisions were made during Phase 0 planning and constrain Phase 1 implementation. They are recorded here so future work (human or AI) does not silently re-decide them.
+
+| Area | Decision |
+|---|---|
+| Project layout | Flat layout at the repository root (`bot/`, `config/`, `downloader/`, `services/`, `tests/`, `run.py`). The `README.md` does **not** use an `app/`-nested layout. |
+| Language persistence (Phase 1) | SQLite. Accessed only through `services/language_service.py`; no other module touches storage directly. |
+| Translation system | A centralized translation service that resolves a stable **message key** + the user's language code to localized text. The underlying storage format for translated strings (Python dict, JSON, YAML, etc.) is an implementation detail to be chosen in Phase 1, not in Phase 0. |
+| `yt-dlp` version | Pinned in `requirements.txt` at `2026.8.19`. Upgrades are a deliberate, tested action, not automatic. |
+| FFmpeg | Treated as a required **external system dependency**, not a Python package. The host must have FFmpeg installed and available on `PATH`. Phase 0 only documents this requirement; Phase 1 implements a startup validation check (see Phase 1 tasks) that fails fast with a clear error if FFmpeg is missing, rather than discovering this mid-download. Automatic installation of FFmpeg is explicitly out of scope; if containerized deployment is introduced later, FFmpeg becomes part of the image instead. |
+| Python version | 3.14.4. |
+| Testing framework | `pytest` as the primary framework, with `pytest-asyncio` for the bot's async code paths, and Python's built-in `unittest.mock` for isolating external dependencies (Telegram API, `yt-dlp`, FFmpeg). The standard test suite must not perform real network calls or real downloads; real-download tests, if introduced later, belong to a separate integration-test tier. |
+| Instagram authentication | Phase 1 uses anonymous `yt-dlp` extraction only. The architecture must leave room for optional cookie/session-based authentication in a later phase. Any future credentials must be handled as configuration/secrets (e.g., via `.env`), never hardcoded or surfaced in user-facing Telegram messages. |
+| Logging | Python's stdlib `logging` module. Phase 1 implements basic logging; Phase 2 expands it into the structured/diagnostic logging described in that phase. |
+| YouTube single-quality videos | If a specific YouTube video only exposes one downloadable quality, the bot auto-downloads it rather than presenting a one-item menu, and explicitly tells the user that only one quality was available. This is a UX exception, not a change to the underlying policy: YouTube quality is still always *inspected* per video; the user is only skipped the selection step when there is nothing to select. |
+
 ## Expected result
 
 A clean repository with a documented architecture and a clear development plan.
@@ -227,15 +246,16 @@ Project-specific concepts:
 - [ ] Implement `/start`.
 - [ ] Implement basic user interaction.
 - [ ] Create the initial main menu.
+- [ ] Validate that FFmpeg is installed and available on `PATH` at startup; fail fast with a clear error if it is not.
 
 ### Language
 
 - [ ] Detect first-time users.
 - [ ] Show Persian/English selection.
-- [ ] Save the selected language.
+- [ ] Save the selected language (SQLite, accessed only through `language_service.py`).
 - [ ] Load the saved language for returning users.
 - [ ] Add language switching.
-- [ ] Centralize translated strings.
+- [ ] Centralize translated strings behind a lookup by message key + language code.
 - [ ] Localize status messages.
 - [ ] Localize errors.
 
@@ -259,6 +279,7 @@ Project-specific concepts:
 - [ ] Determine available video qualities.
 - [ ] Display actual available qualities.
 - [ ] Allow the user to select one.
+- [ ] If only one quality is available, skip the menu, auto-download it, and inform the user only one quality existed.
 - [ ] Download the selected quality.
 - [ ] Merge audio/video when necessary.
 
