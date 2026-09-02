@@ -125,17 +125,17 @@ Focus only on the concepts required to understand this project:
 ## Tasks
 
 - [✅] Create the repository.
-- [ ] Create the agreed project structure.
+- [✅] Create the agreed project structure.
 - [✅] Set up the Python environment.
-- [ ] Install the required Python dependencies.
+- [✅] Install the required Python dependencies.
 - [✅] Install/configure FFmpeg.
 - [✅] Create `.env.example`.
 - [✅] Create `.gitignore`.
-- [ ] Document the architecture.
-- [ ] Define Phase 1 requirements.
-- [ ] Confirm the Instagram quality policy.
-- [ ] Confirm the YouTube quality-selection policy.
-- [ ] Confirm the Persian/English language behavior.
+- [✅] Document the architecture.
+- [✅] Define Phase 1 requirements.
+- [✅] Confirm the Instagram quality policy.
+- [✅] Confirm the YouTube quality-selection policy.
+- [✅] Confirm the Persian/English language behavior.
 
 ## Phase 0 — Finalized Technical Decisions
 
