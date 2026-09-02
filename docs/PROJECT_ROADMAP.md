@@ -125,7 +125,7 @@ Focus only on the concepts required to understand this project:
 ## Tasks
 
 - [✅] Create the repository.
-- [ ] Create the agreed project structure.
+- [✅] Create the agreed project structure.
 - [✅] Set up the Python environment.
 - [ ] Install the required Python dependencies.
 - [✅] Install/configure FFmpeg.
