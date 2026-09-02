@@ -126,11 +126,11 @@ Focus only on the concepts required to understand this project:
 
 - [✅] Create the repository.
 - [ ] Create the agreed project structure.
-- [ ] Set up the Python environment.
+- [✅] Set up the Python environment.
 - [ ] Install the required Python dependencies.
-- [ ] Install/configure FFmpeg.
-- [ ] Create `.env.example`.
-- [ ] Create `.gitignore`.
+- [✅] Install/configure FFmpeg.
+- [✅] Create `.env.example`.
+- [✅] Create `.gitignore`.
 - [ ] Document the architecture.
 - [ ] Define Phase 1 requirements.
 - [ ] Confirm the Instagram quality policy.
