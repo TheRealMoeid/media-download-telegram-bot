@@ -49,6 +49,7 @@ Full rationale and the complete 9-phase plan live in `PROJECT_ROADMAP.md` (repo 
 | Testing | `pytest` + `pytest-asyncio` + stdlib `unittest.mock`. **No real network calls** in the standard suite. Real-download tests (if ever added) belong to a separate integration tier. |
 | Logging | stdlib `logging`. Basic in Phase 1, expanded in Phase 2. |
 | `yt-dlp` version | Pinned in `requirements.txt`. Upgrades are deliberate and tested, never automatic. |
+| `python-telegram-bot` version | Not pinned by Phase 0; bumped `21.6` → `22.8` during Phase 1 Step 4 (see Issue #2, §8) after discovering `21.6` breaks on Python 3.14. Documented in `PROJECT_ROADMAP.md`'s Phase 0 table as of Sept 4, 2026. Future upgrades: deliberate and tested, same policy as `yt-dlp`. |
 
 **The 8 AI Development Rules** (full text in `PROJECT_ROADMAP.md` §15) — the ones I most need to keep front-of-mind:
 
@@ -215,7 +216,7 @@ Downloader Bot/
 
 - Duplicate venv cleanup (`.venv` vs `venv`) — flagged, not done.
 - The CRLF/`git apply` fragility (Issue #3) isn't root-caused. If it recurs on a larger patch, worth actually diagning (e.g. `git config core.autocrlf`, comparing `file <path>` line-ending output, or trying `git apply --whitespace=fix`) rather than falling back to manual edits every time.
-- Consider whether `PROJECT_ROADMAP.md`'s Phase 0 decisions table should get a note about the `python-telegram-bot` version bump, per Rule 8 (documentation currency) — not yet done, low urgency since `requirements.txt` is self-documenting for this.
+- ~~Consider whether `PROJECT_ROADMAP.md`'s Phase 0 decisions table should get a note about the `python-telegram-bot` version bump, per Rule 8 (documentation currency).~~ ✅ Done — added to both `PROJECT_ROADMAP.md` and `docs/PROJECT_ROADMAP.md` (Sept 4, 2026).
 - No fallback/unrecognized-message handler exists yet — sending a plain URL or random text currently does nothing (expected at this point, not a bug, but will matter once URL handling starts).
 
 ---
