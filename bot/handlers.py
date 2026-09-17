@@ -1,7 +1,8 @@
 """Telegram command and callback handlers.
 
-Handlers never manage storage or translation lookups directly - they go
-through services/language_service.py and services/translations.py.
+Handlers never manage storage, translation lookups, or platform-detection
+logic directly - they go through services/language_service.py,
+services/translations.py, and downloader/manager.py.
 """
 
 from __future__ import annotations
@@ -14,15 +15,24 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    MessageHandler,
+    filters,
 )
 
 from bot.keyboards import LANGUAGE_CALLBACK_PREFIX, language_selection_keyboard
+from downloader.manager import Platform, detect_platform
 from services.language_service import get_language, has_saved_language, set_language
 from services.translations import translate
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_LANGUAGE = "en"
+
+_PLATFORM_TRANSLATION_KEYS = {
+    Platform.YOUTUBE: "url.detected_youtube",
+    Platform.INSTAGRAM: "url.detected_instagram",
+    Platform.UNKNOWN: "url.unsupported",
+}
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -73,6 +83,28 @@ async def handle_language_selection(
     )
 
 
+async def handle_url_message(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle a plain text message, treating it as a possible video URL.
+
+    Detects the platform via downloader.manager.detect_platform() and
+    replies in the user's saved language. This does not download
+    anything yet - downloader/youtube.py and downloader/instagram.py
+    are still empty stubs (Phase 1, next steps). This only closes the
+    detection loop end-to-end so the user gets a clear response either
+    way, instead of silence.
+    """
+    user_id = update.effective_user.id
+    lang = get_language(user_id)
+
+    url_text = update.message.text
+    platform = detect_platform(url_text)
+
+    translation_key = _PLATFORM_TRANSLATION_KEYS[platform]
+    await update.message.reply_text(translate(translation_key, lang))
+
+
 def register_handlers(application: Application) -> None:
     """Register all handlers defined in this module on `application`."""
     application.add_handler(CommandHandler("start", start))
@@ -80,4 +112,7 @@ def register_handlers(application: Application) -> None:
         CallbackQueryHandler(
             handle_language_selection, pattern=f"^{LANGUAGE_CALLBACK_PREFIX}"
         )
+    )
+    application.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url_message)
     )
