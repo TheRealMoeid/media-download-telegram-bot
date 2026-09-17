@@ -2,7 +2,15 @@ import pytest
 
 from services.translations import TRANSLATIONS, translate
 
-EXPECTED_KEYS = {"welcome", "welcome_back", "choose_language", "language_set"}
+EXPECTED_KEYS = {
+    "welcome",
+    "welcome_back",
+    "choose_language",
+    "language_set",
+    "url.detected_youtube",
+    "url.detected_instagram",
+    "url.unsupported",
+}
 
 
 def test_all_expected_keys_present():
@@ -35,3 +43,9 @@ def test_translate_unknown_key_raises_keyerror():
 def test_translate_unknown_language_raises_keyerror():
     with pytest.raises(KeyError):
         translate("welcome", "de")
+
+
+def test_url_translation_keys_are_nonempty_in_both_languages():
+    for key in ("url.detected_youtube", "url.detected_instagram", "url.unsupported"):
+        assert translate(key, "en").strip()
+        assert translate(key, "fa").strip()
