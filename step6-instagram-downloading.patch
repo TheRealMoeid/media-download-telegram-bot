@@ -1,0 +1,511 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 14f3782..f8ed1fa 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -28,11 +28,13 @@ Full rationale and the complete 9-phase plan live in `PROJECT_ROADMAP.md` (repo
+ | Language (SQLite persistence, get/has/set) | ✅ Done (Steps 2–3) |
+ | Config loading (`Settings`, `.env`) | ✅ Done (Step 1) |
+ | URL handling / platform detection (Step 5) | ✅ Done — **manually verified working against real Telegram**, Sept 17 2026 |
+-| Instagram downloading | 🔲 Not started — **next up** |
+-| YouTube downloading + quality menu | 🔲 Not started |
++| Instagram downloading (Step 6) | ✅ Implemented + unit-tested (mocked yt-dlp) — **not yet manually verified against a real Instagram URL**; Moeid still needs to run it against a live post/reel |
++| YouTube downloading + quality menu | 🔲 Not started — **next up** |
+ | Delivery + cleanup | 🔲 Not started |
+ 
+-**Immediate next task:** Instagram downloading — implement `downloader/instagram.py` to fetch the best available quality via anonymous `yt-dlp` extraction (Phase 0 decision: no auth in Phase 1). This is the next unimplemented item on the Phase 1 vertical slice; YouTube downloading and delivery/cleanup still follow after it.
++**Immediate next task:** YouTube downloading — implement `downloader/youtube.py` to extract available formats and let the user choose a quality (auto-download + notify when only one quality exists, per Rule 5). Delivery (`services/video_service.py`, `services/file_service.py`, sending the file back through Telegram, cleanup) still follows after both downloaders exist, since it's a shared pipeline for both platforms.
++
++**Note on Step 6:** `downloader/instagram.py` only implements the download step itself (extract + fetch the best-quality file to disk) - it is not yet wired into `bot/handlers.py` or a video/file service, since that wiring is the separate "Delivery" section of `PROJECT_ROADMAP.md`'s Phase 1 task list, not part of "Instagram downloading" itself. Sending a real Instagram URL to the bot today still gets the Step 5 placeholder reply (`url.detected_instagram`), not an actual download - that's expected until the delivery pipeline is built.
+ 
+ ---
+ 
+@@ -76,8 +78,8 @@ Downloader Bot/
+ │   └── settings.py         # frozen Settings dataclass, Settings.from_env(), module singleton `settings`
+ ├── downloader/
+ │   ├── __init__.py
+-│   ├── instagram.py        # empty — Phase 1 upcoming, next
+-│   ├── youtube.py          # empty — Phase 1 upcoming
++│   ├── instagram.py        # download_instagram_video() — anonymous yt-dlp extraction, Step 6, done
++│   ├── youtube.py          # empty — Phase 1 upcoming, next
+ │   └── manager.py          # Platform enum + detect_platform() — Step 5, done
+ ├── services/
+ │   ├── __init__.py
+@@ -93,9 +95,9 @@ Downloader Bot/
+ │   ├── test_handlers.py            # unit tests, service layer mocked
+ │   ├── test_handlers_integration.py# real language_service + tmp SQLite DB, no mocks
+ │   ├── test_handlers_url.py        # handle_url_message(), detect_platform mocked — 4 tests
+-│   ├── test_manager.py             # detect_platform(), pure unit tests — 24 tests
++│   ├── test_manager.py             # detect_platform(), pure unit tests — 25 tests
+ │   ├── test_run.py                 # check_ffmpeg()
+-│   ├── test_instagram.py           # empty stub
++│   ├── test_instagram.py           # download_instagram_video(), fake yt_dlp.YoutubeDL — 15 tests, new in Step 6
+ │   └── test_video_service.py       # empty stub
+ ├── downloads/.gitkeep
+ ├── logs/.gitkeep
+@@ -146,6 +148,17 @@ Downloader Bot/
+ - Scope is intentionally narrow (Rule 3/7): detection only. Does not call `yt-dlp`, does not select/invoke a downloader implementation — `downloader/youtube.py` and `downloader/instagram.py` are still empty stubs. That wiring is later Phase 1 work.
+ - 24 unit tests in `tests/test_manager.py` covering all host variants, malformed/empty/non-URL input, non-string input, whitespace handling, and unsupported domains.
+ 
++### `downloader/instagram.py` (Step 6)
++- `download_instagram_video(url, download_dir=None) -> str` — downloads a single Instagram post/reel via yt-dlp's built-in Instagram extractor, **anonymously** (no login/session/cookies - Phase 0 decision), and returns the path to the downloaded file on disk.
++- `format="bestvideo+bestaudio/best"` + `merge_output_format="mp4"` is the concrete implementation of "best available quality, never intentionally reduced" (Rule 5): always take the highest-quality video/audio streams yt-dlp can find, merging via FFmpeg when Instagram exposes them separately, falling back to the best single combined stream otherwise.
++- `ffmpeg_location` is passed explicitly from `settings.ffmpeg_path` rather than letting yt-dlp fall back to searching `PATH` itself - this keeps it consistent with the same FFmpeg path `run.py`'s startup check already validates, instead of a second, potentially different resolution of "ffmpeg" existing inside yt-dlp's own PATH search.
++- `download_dir` is an optional override of `settings.download_dir`, purely for testability - same pattern as `db_path` in `services/language_service.py`. Production code never passes it.
++- The actual downloaded filepath is resolved via `info["requested_downloads"][0]["filepath"]` when present (this reflects the true final path after any FFmpeg merge changes the extension), falling back to `ydl.prepare_filename(info)` otherwise.
++- All yt-dlp failures (`yt_dlp.utils.DownloadError`) are caught and re-raised as a single `InstagramDownloadError`, chained via `from exc` - callers (eventually `services/video_service.py`) only need to handle one exception type regardless of the underlying yt-dlp failure mode.
++- **No cookie/session options are set anywhere in this module** (Phase 1 = anonymous only). A later phase can add optional authentication by extending `_build_ydl_opts()`'s returned dict (e.g. a `cookiefile` key) without changing `download_instagram_video()`'s public signature - this is the "architecture leaves room for auth later" requirement from Phase 0, made concrete.
++- **Not yet wired into the bot.** This module only implements the download step in isolation; `bot/handlers.py`, `services/video_service.py`, and `services/file_service.py` are unchanged, so a real Instagram URL sent to the bot still gets the Step 5 placeholder reply today. Wiring this in is part of the separate "Delivery" work, which naturally comes after both downloaders (Instagram + YouTube) exist.
++- 15 unit tests in `tests/test_instagram.py`, all against a fake `yt_dlp.YoutubeDL` (no real network calls, no real yt-dlp extraction) - covering the happy path, both filepath-resolution branches, download-dir handling (default + explicit override + auto-creation), the exact yt-dlp options passed (format, merge format, ffmpeg path, no-cookies), and error wrapping/chaining.
++
+ ### `bot/keyboards.py`
+ - `LANGUAGE_CALLBACK_PREFIX = "set_lang:"` — callback_data is `f"{LANGUAGE_CALLBACK_PREFIX}{lang_code}"`, e.g. `"set_lang:fa"`.
+ - `language_selection_keyboard()` returns an `InlineKeyboardMarkup` with one row: 🇮🇷 فارسی / 🇺🇸 English.
+@@ -179,7 +192,7 @@ Downloader Bot/
+ - Async handler tests use `@pytest.mark.asyncio` explicitly on each test (no `pytest.ini`/`asyncio_mode=auto` added — kept minimal, avoided introducing a new config file for something explicit decorators already solve).
+ - `MagicMock`/`AsyncMock` are used to fake python-telegram-bot's `Update`/`Context` objects rather than constructing real ones — keeps tests fast and decoupled from the library's actual object graphs.
+ - Pure-function modules (no Telegram/SQLite involved) get straightforward `pytest.mark.parametrize` unit tests with no mocking at all — see `test_manager.py`, which is the simplest test file in the project by design (`detect_platform()` takes a string, returns an enum, nothing to fake).
+-- **Current test count: 60 passing**, confirmed via a full sandbox rebuild + `pytest tests/ -v` run through Step 5, and re-confirmed by Moeid running the real suite locally (Sept 17 2026). Breakdown: `test_settings.py` (6), `test_language_service.py` (8), `test_translations.py` (7, includes new `url.*` key coverage), `test_handlers.py` (4), `test_handlers_integration.py` (2), `test_run.py` (2), `test_manager.py` (24, new in Step 5), `test_handlers_url.py` (4, new in Step 5), plus empty stub files (`test_instagram.py`, `test_video_service.py`, `test_youtube.py`) contributing 0. Treat this number as current as of Step 5; recount rather than trust it blindly once more steps land.
++- **Current test count: 79 passing**, confirmed via a full sandbox rebuild + `pytest tests/ -v` run through Step 6. (The previous "60" note here undercounted even Step 5's own parametrized tests - actual count through Step 5 was 64, not 60; the two `pytest.mark.parametrize` files expand to more cases than a flat per-file guess suggests. Lesson reaffirmed: recount via the real `pytest -v` output rather than trusting a hand-tallied number in this file.) Breakdown as of Step 6: `test_settings.py` (6), `test_language_service.py` (8), `test_translations.py` (13, parametrized over 7 keys plus 6 direct tests), `test_handlers.py` (4), `test_handlers_integration.py` (2), `test_run.py` (2), `test_manager.py` (25, parametrized), `test_handlers_url.py` (4), `test_instagram.py` (15, new in Step 6), plus empty stub files (`test_video_service.py`, `test_youtube.py`) contributing 0. Treat this number as current as of Step 6; recount rather than trust it blindly once more steps land.
+ 
+ ---
+ 
+@@ -234,6 +247,7 @@ Downloader Bot/
+ - Consider whether `PROJECT_ROADMAP.md`'s Phase 0 decisions table should get a note about the `python-telegram-bot` version bump, per Rule 8 (documentation currency) — not yet done, low urgency since `requirements.txt` is self-documenting for this.
+ - ~~No fallback/unrecognized-message handler exists yet~~ — **resolved in Step 5**: `handle_url_message` now replies to any plain text message (URL or not), so this is no longer an open item.
+ - The Step 5 delivery for this round used direct file delivery (via `present_files`) rather than a `.patch`, since Moeid reported not receiving the patch output — worth confirming at the start of future delivery rounds whether patch or direct file content is landing correctly, rather than assuming the patch workflow silently worked.
++- **Step 6 (Instagram downloading) has not been manually verified against a real Instagram URL.** Unlike Steps 4 and 5, which both have a "manually verified working against real Telegram" note with a date, `downloader/instagram.py` has only been exercised against a fake `yt_dlp.YoutubeDL` in the sandbox test suite. Moeid should try `download_instagram_video()` against a real public post/reel URL (e.g. from a throwaway script or a REPL) before this is considered done in the same sense Steps 4/5 are - anonymous yt-dlp extraction is exactly the kind of thing that can pass every mocked test and still fail against Instagram's actual current behavior.
+ 
+ ---
+ 
+diff --git a/PROJECT_ROADMAP.md b/PROJECT_ROADMAP.md
+index 484946b..1eafd38 100644
+--- a/PROJECT_ROADMAP.md
++++ b/PROJECT_ROADMAP.md
+@@ -268,10 +268,10 @@ Project-specific concepts:
+ 
+ ### Instagram
+ 
+-- [ ] Implement Instagram downloading.
+-- [ ] Select the best available quality automatically.
+-- [ ] Avoid intentionally reducing quality.
+-- [ ] Handle required FFmpeg processing.
++- [✅] Implement Instagram downloading.
++- [✅] Select the best available quality automatically.
++- [✅] Avoid intentionally reducing quality.
++- [✅] Handle required FFmpeg processing.
+ 
+ ### YouTube
+ 
+diff --git a/docs/PROJECT_ROADMAP.md b/docs/PROJECT_ROADMAP.md
+index 484946b..1eafd38 100644
+--- a/docs/PROJECT_ROADMAP.md
++++ b/docs/PROJECT_ROADMAP.md
+@@ -268,10 +268,10 @@ Project-specific concepts:
+ 
+ ### Instagram
+ 
+-- [ ] Implement Instagram downloading.
+-- [ ] Select the best available quality automatically.
+-- [ ] Avoid intentionally reducing quality.
+-- [ ] Handle required FFmpeg processing.
++- [✅] Implement Instagram downloading.
++- [✅] Select the best available quality automatically.
++- [✅] Avoid intentionally reducing quality.
++- [✅] Handle required FFmpeg processing.
+ 
+ ### YouTube
+ 
+diff --git a/downloader/instagram.py b/downloader/instagram.py
+index e69de29..c684ec7 100644
+--- a/downloader/instagram.py
++++ b/downloader/instagram.py
+@@ -0,0 +1,131 @@
++"""Instagram video downloading via yt-dlp (anonymous extraction).
++
++Per PROJECT_ROADMAP.md / CLAUDE.md, Instagram always auto-downloads the
++best available quality - there is no user-facing quality menu (contrast
++with downloader/youtube.py, which will inspect formats and let the user
++choose). This module implements that policy using yt-dlp's built-in
++Instagram extractor, anonymously: no login, session, or cookies are used
++or required (Phase 0 decision: "Instagram authentication - Phase 1 uses
++anonymous yt-dlp extraction only").
++
++Scope note (Rule 3/7): this module only downloads a single Instagram
++post/reel URL to a file on disk and returns its path. It does not send
++anything to Telegram and does not delete the file afterwards - that is
++services/video_service.py and services/file_service.py's job (still
++empty stubs; wiring this into the bot's delivery flow is later Phase 1
++work, tracked separately from "Instagram downloading" itself in
++PROJECT_ROADMAP.md's Phase 1 task list).
++
++The architecture leaves room for cookie/session-based authentication to
++be added in a later phase (see _build_ydl_opts) without changing this
++module's public function signature.
++"""
++
++from __future__ import annotations
++
++import logging
++import os
++from typing import Any, Optional
++
++import yt_dlp
++
++from config.settings import settings
++
++logger = logging.getLogger(__name__)
++
++
++class InstagramDownloadError(Exception):
++    """Raised when an Instagram post/reel cannot be extracted or downloaded.
++
++    Wraps whatever yt-dlp raised internally (chained via `from exc`) so
++    callers only need to handle one exception type regardless of the
++    underlying failure (network error, private/unavailable post,
++    unsupported content, FFmpeg merge failure, etc.).
++    """
++
++
++def _build_ydl_opts(download_dir: str, ffmpeg_path: str) -> dict[str, Any]:
++    """Build the yt-dlp options used for Instagram downloads.
++
++    format="bestvideo+bestaudio/best" is what "best available quality,
++    never intentionally reduced" means in practice: always prefer the
++    highest-quality video and audio streams yt-dlp can find, merging
++    them via FFmpeg when Instagram exposes them separately, and falling
++    back to the best single combined stream when it doesn't.
++
++    ffmpeg_location is passed explicitly (rather than letting yt-dlp
++    fall back to searching PATH itself) so this module honors the same
++    configured FFMPEG_PATH that run.py's startup check already
++    validates, instead of silently relying on a second, potentially
++    different resolution of "ffmpeg".
++
++    Anonymous by design - no cookies/session options are set here (see
++    module docstring). A later phase can extend this dict (e.g. a
++    "cookiefile" key) to add optional authentication without changing
++    download_instagram_video()'s public interface.
++    """
++    return {
++        "format": "bestvideo+bestaudio/best",
++        "merge_output_format": "mp4",
++        "outtmpl": os.path.join(download_dir, "%(id)s.%(ext)s"),
++        "ffmpeg_location": ffmpeg_path,
++        "noplaylist": True,
++        "quiet": True,
++        "no_warnings": True,
++    }
++
++
++def _resolve_downloaded_filepath(ydl: "yt_dlp.YoutubeDL", info: dict[str, Any]) -> str:
++    """Resolve the actual downloaded file path from yt-dlp's result info.
++
++    Prefers info["requested_downloads"][0]["filepath"], which reflects
++    the final path after any FFmpeg merge/remux (e.g. when
++    merge_output_format changes the file extension). Falls back to
++    ydl.prepare_filename(info) for result shapes that don't include
++    requested_downloads.
++    """
++    requested_downloads = info.get("requested_downloads") or []
++    if requested_downloads and requested_downloads[0].get("filepath"):
++        return requested_downloads[0]["filepath"]
++    return ydl.prepare_filename(info)
++
++
++def download_instagram_video(url: str, download_dir: Optional[str] = None) -> str:
++    """Download an Instagram post/reel at the best available quality.
++
++    Uses yt-dlp's Instagram extractor anonymously - no login or session
++    is used or required (Phase 1 scope; see module docstring).
++
++    Args:
++        url: An Instagram post/reel URL. Callers are expected to have
++            already confirmed this is an Instagram URL via
++            downloader.manager.detect_platform() - this function does
++            not re-validate the platform.
++        download_dir: Optional override of settings.download_dir, for
++            testability. Mirrors the db_path override pattern used in
++            services/language_service.py.
++
++    Returns:
++        The path to the downloaded video file on disk.
++
++    Raises:
++        InstagramDownloadError: if extraction or download fails for any
++            reason (network failure, private/unavailable post,
++            unsupported content, FFmpeg merge failure, etc.).
++    """
++    resolved_dir = download_dir if download_dir is not None else settings.download_dir
++    os.makedirs(resolved_dir, exist_ok=True)
++
++    ydl_opts = _build_ydl_opts(resolved_dir, settings.ffmpeg_path)
++
++    try:
++        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
++            info = ydl.extract_info(url, download=True)
++            filepath = _resolve_downloaded_filepath(ydl, info)
++    except yt_dlp.utils.DownloadError as exc:
++        logger.error("Instagram download failed for %s: %s", url, exc)
++        raise InstagramDownloadError(
++            f"Could not download Instagram media from {url!r}: {exc}"
++        ) from exc
++
++    return filepath
+diff --git a/tests/test_instagram.py b/tests/test_instagram.py
+index e69de29..119739d 100644
+--- a/tests/test_instagram.py
++++ b/tests/test_instagram.py
+@@ -0,0 +1,253 @@
++"""Tests for downloader/instagram.py's download_instagram_video().
++
++download_instagram_video() is tested against a fake yt_dlp.YoutubeDL -
++no real network calls or real yt-dlp extraction happen here, per the
++project's "no real network calls in the standard test suite" policy
++(PROJECT_ROADMAP.md, Phase 0).
++
++The module's `settings` reference is replaced with a SimpleNamespace
++pointed at a tmp_path directory - the same pattern used in
++tests/test_handlers_integration.py for services/language_service.py's
++settings dependency (Settings is a frozen dataclass, so individual
++fields can't be monkeypatched directly; the whole object reference the
++module holds is swapped out instead).
++"""
++
++from __future__ import annotations
++
++import os
++import types
++
++import pytest
++import yt_dlp
++
++import downloader.instagram as instagram_module
++from downloader.instagram import InstagramDownloadError, download_instagram_video
++
++
++class _FakeYoutubeDL:
++    """Minimal stand-in for yt_dlp.YoutubeDL.
++
++    Only implements the surface download_instagram_video() actually
++    uses: use as a context manager, extract_info(), prepare_filename().
++    Configured per-test via subclassing in _install_fake_ydl() rather
++    than a full mocking framework, since the real interface exercised
++    here is small.
++    """
++
++    #: Set on construction; read back in tests to assert on the options
++    #: yt-dlp was configured with and how it was called.
++    last_instance: "_FakeYoutubeDL | None" = None
++
++    _info_result: dict = {}
++    _prepare_filename_result = "/fake/path/video.mp4"
++    _raises = None
++
++    def __init__(self, opts):
++        self.opts = opts
++        self.extract_info_calls = []
++        type(self).last_instance = self
++
++    def __enter__(self):
++        return self
++
++    def __exit__(self, exc_type, exc, tb):
++        return False
++
++    def extract_info(self, url, download=True):
++        self.extract_info_calls.append((url, download))
++        if self._raises is not None:
++            raise self._raises
++        return self._info_result
++
++    def prepare_filename(self, info):
++        return self._prepare_filename_result
++
++
++def _install_fake_ydl(monkeypatch, info_result=None, prepare_filename_result=None, raises=None):
++    """Patch downloader.instagram.yt_dlp.YoutubeDL with a configured fake.
++
++    Returns the fake class so tests can inspect
++    FakeClass.last_instance.opts / .extract_info_calls after calling
++    download_instagram_video().
++    """
++
++    class ConfiguredFakeYoutubeDL(_FakeYoutubeDL):
++        _info_result = info_result if info_result is not None else {"id": "x"}
++        _prepare_filename_result = prepare_filename_result or "/fake/path/video.mp4"
++        _raises = raises
++
++    monkeypatch.setattr(instagram_module.yt_dlp, "YoutubeDL", ConfiguredFakeYoutubeDL)
++    return ConfiguredFakeYoutubeDL
++
++
++@pytest.fixture
++def download_dir(tmp_path):
++    return str(tmp_path / "downloads")
++
++
++@pytest.fixture(autouse=True)
++def patched_settings(monkeypatch, download_dir):
++    """Point downloader.instagram at test-local settings for every test."""
++    monkeypatch.setattr(
++        instagram_module,
++        "settings",
++        types.SimpleNamespace(download_dir=download_dir, ffmpeg_path="ffmpeg"),
++    )
++
++
++# ---------------------------------------------------------------------------
++# Happy path / return value resolution
++# ---------------------------------------------------------------------------
++
++
++def test_returns_requested_downloads_filepath_when_present(monkeypatch):
++    info = {
++        "id": "abc123",
++        "requested_downloads": [{"filepath": "/fake/merged/abc123.mp4"}],
++    }
++    _install_fake_ydl(monkeypatch, info_result=info)
++
++    result = download_instagram_video("https://instagram.com/reel/abc123/")
++
++    assert result == "/fake/merged/abc123.mp4"
++
++
++def test_falls_back_to_prepare_filename_when_no_requested_downloads(monkeypatch):
++    _install_fake_ydl(
++        monkeypatch,
++        info_result={"id": "abc123"},
++        prepare_filename_result="/fake/path/abc123.mp4",
++    )
++
++    result = download_instagram_video("https://instagram.com/p/abc123/")
++
++    assert result == "/fake/path/abc123.mp4"
++
++
++def test_falls_back_to_prepare_filename_when_requested_downloads_empty(monkeypatch):
++    _install_fake_ydl(
++        monkeypatch,
++        info_result={"id": "abc123", "requested_downloads": []},
++        prepare_filename_result="/fake/path/abc123.mp4",
++    )
++
++    result = download_instagram_video("https://instagram.com/p/abc123/")
++
++    assert result == "/fake/path/abc123.mp4"
++
++
++def test_creates_download_dir_if_missing(download_dir, monkeypatch):
++    assert not os.path.isdir(download_dir)
++    _install_fake_ydl(monkeypatch)
++
++    download_instagram_video("https://instagram.com/reel/x/")
++
++    assert os.path.isdir(download_dir)
++
++
++def test_explicit_download_dir_overrides_settings(monkeypatch, tmp_path):
++    override_dir = str(tmp_path / "explicit_override")
++    fake_cls = _install_fake_ydl(monkeypatch)
++
++    download_instagram_video("https://instagram.com/reel/x/", download_dir=override_dir)
++
++    assert os.path.isdir(override_dir)
++    assert override_dir in fake_cls.last_instance.opts["outtmpl"]
++
++
++# ---------------------------------------------------------------------------
++# yt-dlp options: "best available quality, never intentionally reduced"
++# ---------------------------------------------------------------------------
++
++
++def test_uses_best_video_plus_best_audio_format(monkeypatch):
++    fake_cls = _install_fake_ydl(monkeypatch)
++
++    download_instagram_video("https://instagram.com/reel/x/")
++
++    assert fake_cls.last_instance.opts["format"] == "bestvideo+bestaudio/best"
++
++
++def test_merges_to_mp4(monkeypatch):
++    fake_cls = _install_fake_ydl(monkeypatch)
++
++    download_instagram_video("https://instagram.com/reel/x/")
++
++    assert fake_cls.last_instance.opts["merge_output_format"] == "mp4"
++
++
++def test_passes_configured_ffmpeg_path(monkeypatch, download_dir):
++    monkeypatch.setattr(
++        instagram_module,
++        "settings",
++        types.SimpleNamespace(download_dir=download_dir, ffmpeg_path="/custom/ffmpeg"),
++    )
++    fake_cls = _install_fake_ydl(monkeypatch)
++
++    download_instagram_video("https://instagram.com/reel/x/")
++
++    assert fake_cls.last_instance.opts["ffmpeg_location"] == "/custom/ffmpeg"
++
++
++def test_disables_playlist_handling(monkeypatch):
++    fake_cls = _install_fake_ydl(monkeypatch)
++
++    download_instagram_video("https://instagram.com/reel/x/")
++
++    assert fake_cls.last_instance.opts["noplaylist"] is True
++
++
++def test_extract_info_called_with_download_true(monkeypatch):
++    fake_cls = _install_fake_ydl(monkeypatch)
++
++    url = "https://instagram.com/reel/x/"
++    download_instagram_video(url)
++
++    assert fake_cls.last_instance.extract_info_calls == [(url, True)]
++
++
++def test_no_cookie_or_session_options_are_set(monkeypatch):
++    """Anonymous-only in Phase 1 - no cookiefile/cookiesfrombrowser keys."""
++    fake_cls = _install_fake_ydl(monkeypatch)
++
++    download_instagram_video("https://instagram.com/reel/x/")
++
++    opts = fake_cls.last_instance.opts
++    assert "cookiefile" not in opts
++    assert "cookiesfrombrowser" not in opts
++
++
++# ---------------------------------------------------------------------------
++# Failure handling
++# ---------------------------------------------------------------------------
++
++
++def test_yt_dlp_download_error_raises_instagram_download_error(monkeypatch):
++    _install_fake_ydl(monkeypatch, raises=yt_dlp.utils.DownloadError("boom"))
++
++    with pytest.raises(InstagramDownloadError):
++        download_instagram_video("https://instagram.com/reel/x/")
++
++
++def test_error_message_includes_the_failing_url(monkeypatch):
++    _install_fake_ydl(monkeypatch, raises=yt_dlp.utils.DownloadError("boom"))
++
++    url = "https://instagram.com/reel/private-post/"
++    with pytest.raises(InstagramDownloadError, match="private-post"):
++        download_instagram_video(url)
++
++
++def test_instagram_download_error_chains_the_original_exception(monkeypatch):
++    original = yt_dlp.utils.DownloadError("boom")
++    _install_fake_ydl(monkeypatch, raises=original)
++
++    with pytest.raises(InstagramDownloadError) as exc_info:
++        download_instagram_video("https://instagram.com/reel/x/")
++
++    assert exc_info.value.__cause__ is original
++
++
++def test_instagram_download_error_is_its_own_exception_type():
++    assert issubclass(InstagramDownloadError, Exception)
++    assert not issubclass(InstagramDownloadError, yt_dlp.utils.DownloadError)

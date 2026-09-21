@@ -27,12 +27,14 @@ Full rationale and the complete 9-phase plan live in `PROJECT_ROADMAP.md` (repo 
 | Bot foundation (`/start`, FFmpeg startup check, keyboard, translations) | ✅ Done (Step 4) — **manually verified working against real Telegram**, Sept 4 2026 |
 | Language (SQLite persistence, get/has/set) | ✅ Done (Steps 2–3) |
 | Config loading (`Settings`, `.env`) | ✅ Done (Step 1) |
-| URL handling / platform detection | 🔲 Not started — **next up** |
-| Instagram downloading | 🔲 Not started |
-| YouTube downloading + quality menu | 🔲 Not started |
+| URL handling / platform detection (Step 5) | ✅ Done — **manually verified working against real Telegram**, Sept 17 2026 |
+| Instagram downloading (Step 6) | ✅ Implemented + unit-tested (mocked yt-dlp) — **not yet manually verified against a real Instagram URL**; Moeid still needs to run it against a live post/reel |
+| YouTube downloading + quality menu | 🔲 Not started — **next up** |
 | Delivery + cleanup | 🔲 Not started |
 
-**Immediate next task:** URL handling and platform detection (receive a message → validate URL → detect YouTube vs. Instagram vs. unsupported). Everything else in Phase 1 depends on this.
+**Immediate next task:** YouTube downloading — implement `downloader/youtube.py` to extract available formats and let the user choose a quality (auto-download + notify when only one quality exists, per Rule 5). Delivery (`services/video_service.py`, `services/file_service.py`, sending the file back through Telegram, cleanup) still follows after both downloaders exist, since it's a shared pipeline for both platforms.
+
+**Note on Step 6:** `downloader/instagram.py` only implements the download step itself (extract + fetch the best-quality file to disk) - it is not yet wired into `bot/handlers.py` or a video/file service, since that wiring is the separate "Delivery" section of `PROJECT_ROADMAP.md`'s Phase 1 task list, not part of "Instagram downloading" itself. Sending a real Instagram URL to the bot today still gets the Step 5 placeholder reply (`url.detected_instagram`), not an actual download - that's expected until the delivery pipeline is built.
 
 ---
 
@@ -49,7 +51,6 @@ Full rationale and the complete 9-phase plan live in `PROJECT_ROADMAP.md` (repo 
 | Testing | `pytest` + `pytest-asyncio` + stdlib `unittest.mock`. **No real network calls** in the standard suite. Real-download tests (if ever added) belong to a separate integration tier. |
 | Logging | stdlib `logging`. Basic in Phase 1, expanded in Phase 2. |
 | `yt-dlp` version | Pinned in `requirements.txt`. Upgrades are deliberate and tested, never automatic. |
-| `python-telegram-bot` version | Not pinned by Phase 0; bumped `21.6` → `22.8` during Phase 1 Step 4 (see Issue #2, §8) after discovering `21.6` breaks on Python 3.14. Documented in `PROJECT_ROADMAP.md`'s Phase 0 table as of Sept 4, 2026. Future upgrades: deliberate and tested, same policy as `yt-dlp`. |
 
 **The 8 AI Development Rules** (full text in `PROJECT_ROADMAP.md` §15) — the ones I most need to keep front-of-mind:
 
@@ -77,24 +78,26 @@ Downloader Bot/
 │   └── settings.py         # frozen Settings dataclass, Settings.from_env(), module singleton `settings`
 ├── downloader/
 │   ├── __init__.py
-│   ├── instagram.py        # empty — Phase 1 upcoming
-│   ├── youtube.py          # empty — Phase 1 upcoming
-│   └── manager.py          # empty — Phase 1 upcoming
+│   ├── instagram.py        # download_instagram_video() — anonymous yt-dlp extraction, Step 6, done
+│   ├── youtube.py          # empty — Phase 1 upcoming, next
+│   └── manager.py          # Platform enum + detect_platform() — Step 5, done
 ├── services/
 │   ├── __init__.py
 │   ├── language_service.py # get_language / has_saved_language / set_language — SQLite, only module touching it
-│   ├── translations.py     # TRANSLATIONS dict + translate(key, lang)
+│   ├── translations.py     # TRANSLATIONS dict + translate(key, lang), incl. url.* keys
 │   ├── file_service.py     # empty — Phase 1 upcoming
 │   └── video_service.py    # empty — Phase 1 upcoming
 ├── tests/
 │   ├── __init__.py
 │   ├── test_settings.py            # 6 tests
 │   ├── test_language_service.py    # 8 tests
-│   ├── test_translations.py        # tests for translate()
+│   ├── test_translations.py        # tests for translate(), incl. url.* keys
 │   ├── test_handlers.py            # unit tests, service layer mocked
 │   ├── test_handlers_integration.py# real language_service + tmp SQLite DB, no mocks
+│   ├── test_handlers_url.py        # handle_url_message(), detect_platform mocked — 4 tests
+│   ├── test_manager.py             # detect_platform(), pure unit tests — 25 tests
 │   ├── test_run.py                 # check_ffmpeg()
-│   ├── test_instagram.py           # empty stub
+│   ├── test_instagram.py           # download_instagram_video(), fake yt_dlp.YoutubeDL — 15 tests, new in Step 6
 │   └── test_video_service.py       # empty stub
 ├── downloads/.gitkeep
 ├── logs/.gitkeep
@@ -132,9 +135,29 @@ Downloader Bot/
 ### `services/translations.py`
 - Kept intentionally minimal per explicit instruction: plain dict `TRANSLATIONS: dict[str, dict[str, str]]`, no fallback chains, no JSON/YAML.
 - `translate(key, lang) -> str` — raises `KeyError` on unknown key or language (fail loudly, not silently).
-- Current keys (exactly what Step 4 needed, nothing more): `welcome`, `welcome_back`, `choose_language`, `language_set`.
+- Keys as of Step 4: `welcome`, `welcome_back`, `choose_language`, `language_set`.
+- Keys added in Step 5: `url.detected_youtube`, `url.detected_instagram`, `url.unsupported` — used by `handle_url_message` in `bot/handlers.py`. Dotted key names are just a naming convention (grouping by feature), not a nested-lookup mechanism — `TRANSLATIONS` is still a flat single-level dict keyed by the full string.
 - `language_set` is **not parameterized** — it's just two fixed strings, one per language, each already saying "set to [that language]" in that language. This works because there are only two languages; if a third language were ever added this would need to become a template instead of two hardcoded full sentences.
 - Handlers must never hardcode user-facing strings — always go through `translate()`.
+
+### `downloader/manager.py` (Step 5)
+- `Platform` enum: `YOUTUBE`, `INSTAGRAM`, `UNKNOWN`. Chosen deliberately over a plain string (the project's usual convention for small fixed sets, e.g. `SUPPORTED_LANGUAGES`) because this module is the seam where Phase 4 ("Platform Expansion") will add more platforms later — a closed, typed set is a better fit here than it was for languages.
+- `detect_platform(url: str) -> Platform` — pure function, no I/O, no Telegram objects. Validates general URL shape via `urllib.parse.urlparse` (must have `http`/`https` scheme + a netloc), then matches the lowercased hostname against `YOUTUBE_HOSTS` / `INSTAGRAM_HOSTS` domain sets.
+- **Never raises.** Malformed input, non-string input, and unrecognized domains all return `Platform.UNKNOWN` — detection "failure" is a normal, expected outcome (users can paste anything), not an error condition.
+- `YOUTUBE_HOSTS` covers `youtube.com`, `www.youtube.com`, `m.youtube.com`, `youtu.be`, `www.youtu.be`. `INSTAGRAM_HOSTS` covers `instagram.com`, `www.instagram.com`.
+- Scope is intentionally narrow (Rule 3/7): detection only. Does not call `yt-dlp`, does not select/invoke a downloader implementation — `downloader/youtube.py` and `downloader/instagram.py` are still empty stubs. That wiring is later Phase 1 work.
+- 24 unit tests in `tests/test_manager.py` covering all host variants, malformed/empty/non-URL input, non-string input, whitespace handling, and unsupported domains.
+
+### `downloader/instagram.py` (Step 6)
+- `download_instagram_video(url, download_dir=None) -> str` — downloads a single Instagram post/reel via yt-dlp's built-in Instagram extractor, **anonymously** (no login/session/cookies - Phase 0 decision), and returns the path to the downloaded file on disk.
+- `format="bestvideo+bestaudio/best"` + `merge_output_format="mp4"` is the concrete implementation of "best available quality, never intentionally reduced" (Rule 5): always take the highest-quality video/audio streams yt-dlp can find, merging via FFmpeg when Instagram exposes them separately, falling back to the best single combined stream otherwise.
+- `ffmpeg_location` is passed explicitly from `settings.ffmpeg_path` rather than letting yt-dlp fall back to searching `PATH` itself - this keeps it consistent with the same FFmpeg path `run.py`'s startup check already validates, instead of a second, potentially different resolution of "ffmpeg" existing inside yt-dlp's own PATH search.
+- `download_dir` is an optional override of `settings.download_dir`, purely for testability - same pattern as `db_path` in `services/language_service.py`. Production code never passes it.
+- The actual downloaded filepath is resolved via `info["requested_downloads"][0]["filepath"]` when present (this reflects the true final path after any FFmpeg merge changes the extension), falling back to `ydl.prepare_filename(info)` otherwise.
+- All yt-dlp failures (`yt_dlp.utils.DownloadError`) are caught and re-raised as a single `InstagramDownloadError`, chained via `from exc` - callers (eventually `services/video_service.py`) only need to handle one exception type regardless of the underlying yt-dlp failure mode.
+- **No cookie/session options are set anywhere in this module** (Phase 1 = anonymous only). A later phase can add optional authentication by extending `_build_ydl_opts()`'s returned dict (e.g. a `cookiefile` key) without changing `download_instagram_video()`'s public signature - this is the "architecture leaves room for auth later" requirement from Phase 0, made concrete.
+- **Not yet wired into the bot.** This module only implements the download step in isolation; `bot/handlers.py`, `services/video_service.py`, and `services/file_service.py` are unchanged, so a real Instagram URL sent to the bot still gets the Step 5 placeholder reply today. Wiring this in is part of the separate "Delivery" work, which naturally comes after both downloaders (Instagram + YouTube) exist.
+- 15 unit tests in `tests/test_instagram.py`, all against a fake `yt_dlp.YoutubeDL` (no real network calls, no real yt-dlp extraction) - covering the happy path, both filepath-resolution branches, download-dir handling (default + explicit override + auto-creation), the exact yt-dlp options passed (format, merge format, ffmpeg path, no-cookies), and error wrapping/chaining.
 
 ### `bot/keyboards.py`
 - `LANGUAGE_CALLBACK_PREFIX = "set_lang:"` — callback_data is `f"{LANGUAGE_CALLBACK_PREFIX}{lang_code}"`, e.g. `"set_lang:fa"`.
@@ -149,7 +172,11 @@ Downloader Bot/
   - **Order matters:** calls `set_language(user_id, lang)` first, *then* sends the confirmation — confirmation must reflect the just-saved state, not stale state. This is asserted directly in `test_language_selection_saves_before_confirming`.
   - Confirmation is sent as a **new message** (not an edit of the keyboard message) — explicit decision from Moeid.
   - Confirmation text is always `translate("language_set", lang)` using the **newly selected** `lang`, never whatever was active before.
-- `register_handlers(application)` — registers the `CommandHandler("start", start)` and a `CallbackQueryHandler(handle_language_selection, pattern=f"^{LANGUAGE_CALLBACK_PREFIX}")`.
+- `handle_url_message(update, context)` (Step 5):
+  - Registered as a catch-all `MessageHandler(filters.TEXT & ~filters.COMMAND, ...)` — fires on any plain text message that isn't a slash command, so `/start` and other commands are unaffected.
+  - Looks up the sender's saved language via `get_language(user_id)`, calls `detect_platform(update.message.text)` from `downloader/manager.py`, and replies with the matching translation (`url.detected_youtube` / `url.detected_instagram` / `url.unsupported`) via a small `_PLATFORM_TRANSLATION_KEYS` dict mapping `Platform` → translation key.
+  - Does **not** download anything — `downloader/youtube.py` and `downloader/instagram.py` are still empty. This only closes the detection loop end-to-end (user gets a clear reply instead of silence); actual downloading is later Phase 1 work.
+- `register_handlers(application)` — registers, in order: `CommandHandler("start", start)`, `CallbackQueryHandler(handle_language_selection, pattern=f"^{LANGUAGE_CALLBACK_PREFIX}")`, then `MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url_message)`. Order matters in `python-telegram-bot` — commands and callback buttons are matched before the catch-all text handler gets a chance to see the update.
 
 ### `run.py`
 - `check_ffmpeg(ffmpeg_path)` — small, standalone, directly-testable function using `shutil.which()`. Raises `RuntimeError` with a clear message if not found. Deliberately **not** a separate `bot/startup.py` module — Moeid's explicit call: not worth a new module for one Phase 1 check.
@@ -164,7 +191,8 @@ Downloader Bot/
 - A separate `test_handlers_integration.py` exists specifically to exercise the **real** `language_service` against a **temporary SQLite file** (via `monkeypatch.setattr(language_service_module, "settings", types.SimpleNamespace(db_path=tmp_path_file))`) — no mocking of storage/language logic at all. This was an explicit ask from Moeid after the mocked-only version, to get real DB coverage without touching the production `bot.db` or leaving stray files (pytest's `tmp_path` fixture auto-cleans).
 - Async handler tests use `@pytest.mark.asyncio` explicitly on each test (no `pytest.ini`/`asyncio_mode=auto` added — kept minimal, avoided introducing a new config file for something explicit decorators already solve).
 - `MagicMock`/`AsyncMock` are used to fake python-telegram-bot's `Update`/`Context` objects rather than constructing real ones — keeps tests fast and decoupled from the library's actual object graphs.
-- Current test count: **17 passing** across `test_settings.py` (6), `test_language_service.py` (8)... wait — reconcile: actually current totals are `test_settings.py` (6) + `test_language_service.py` (8) = 14 from Steps 1–3, plus 17 new from Step 4 work (`test_translations.py`, `test_handlers.py`, `test_handlers_integration.py`, `test_run.py`) = **31 tests total** once merged in the real repo. (The "17" figure quoted during Step 4 work was just the new Step-4-era tests measured in isolation in the sandbox, which didn't include the pre-existing Step 1–3 test files.)
+- Pure-function modules (no Telegram/SQLite involved) get straightforward `pytest.mark.parametrize` unit tests with no mocking at all — see `test_manager.py`, which is the simplest test file in the project by design (`detect_platform()` takes a string, returns an enum, nothing to fake).
+- **Current test count: 79 passing**, confirmed via a full sandbox rebuild + `pytest tests/ -v` run through Step 6. (The previous "60" note here undercounted even Step 5's own parametrized tests - actual count through Step 5 was 64, not 60; the two `pytest.mark.parametrize` files expand to more cases than a flat per-file guess suggests. Lesson reaffirmed: recount via the real `pytest -v` output rather than trusting a hand-tallied number in this file.) Breakdown as of Step 6: `test_settings.py` (6), `test_language_service.py` (8), `test_translations.py` (13, parametrized over 7 keys plus 6 direct tests), `test_handlers.py` (4), `test_handlers_integration.py` (2), `test_run.py` (2), `test_manager.py` (25, parametrized), `test_handlers_url.py` (4), `test_instagram.py` (15, new in Step 6), plus empty stub files (`test_video_service.py`, `test_youtube.py`) contributing 0. Treat this number as current as of Step 6; recount rather than trust it blindly once more steps land.
 
 ---
 
@@ -215,9 +243,11 @@ Downloader Bot/
 ## 10. Open items / things to revisit later (not urgent)
 
 - Duplicate venv cleanup (`.venv` vs `venv`) — flagged, not done.
-- The CRLF/`git apply` fragility (Issue #3) isn't root-caused. If it recurs on a larger patch, worth actually diagning (e.g. `git config core.autocrlf`, comparing `file <path>` line-ending output, or trying `git apply --whitespace=fix`) rather than falling back to manual edits every time.
-- ~~Consider whether `PROJECT_ROADMAP.md`'s Phase 0 decisions table should get a note about the `python-telegram-bot` version bump, per Rule 8 (documentation currency).~~ ✅ Done — added to both `PROJECT_ROADMAP.md` and `docs/PROJECT_ROADMAP.md` (Sept 4, 2026).
-- No fallback/unrecognized-message handler exists yet — sending a plain URL or random text currently does nothing (expected at this point, not a bug, but will matter once URL handling starts).
+- The CRLF/`git apply` fragility (Issue #3) isn't root-caused. If it recurs on a larger patch, worth actually diagnosing (e.g. `git config core.autocrlf`, comparing `file <path>` line-ending output, or trying `git apply --whitespace=fix`) rather than falling back to manual edits every time.
+- Consider whether `PROJECT_ROADMAP.md`'s Phase 0 decisions table should get a note about the `python-telegram-bot` version bump, per Rule 8 (documentation currency) — not yet done, low urgency since `requirements.txt` is self-documenting for this.
+- ~~No fallback/unrecognized-message handler exists yet~~ — **resolved in Step 5**: `handle_url_message` now replies to any plain text message (URL or not), so this is no longer an open item.
+- The Step 5 delivery for this round used direct file delivery (via `present_files`) rather than a `.patch`, since Moeid reported not receiving the patch output — worth confirming at the start of future delivery rounds whether patch or direct file content is landing correctly, rather than assuming the patch workflow silently worked.
+- **Step 6 (Instagram downloading) has not been manually verified against a real Instagram URL.** Unlike Steps 4 and 5, which both have a "manually verified working against real Telegram" note with a date, `downloader/instagram.py` has only been exercised against a fake `yt_dlp.YoutubeDL` in the sandbox test suite. Moeid should try `download_instagram_video()` against a real public post/reel URL (e.g. from a throwaway script or a REPL) before this is considered done in the same sense Steps 4/5 are - anonymous yt-dlp extraction is exactly the kind of thing that can pass every mocked test and still fail against Instagram's actual current behavior.
 
 ---
 
