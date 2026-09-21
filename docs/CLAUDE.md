@@ -28,7 +28,7 @@ Full rationale and the complete 9-phase plan live in `PROJECT_ROADMAP.md` (repo 
 | Language (SQLite persistence, get/has/set) | ✅ Done (Steps 2–3) |
 | Config loading (`Settings`, `.env`) | ✅ Done (Step 1) |
 | URL handling / platform detection (Step 5) | ✅ Done — **manually verified working against real Telegram**, Sept 17 2026 |
-| Instagram downloading (Step 6) | ✅ Implemented + unit-tested (mocked yt-dlp) — **not yet manually verified against a real Instagram URL**; Moeid still needs to run it against a live post/reel |
+| Instagram downloading (Step 6) | ✅ Done — **manually verified working against a real Instagram reel**, Sept 21 2026 (anonymous yt-dlp extraction + FFmpeg merge, confirmed playable output) |
 | YouTube downloading + quality menu | 🔲 Not started — **next up** |
 | Delivery + cleanup | 🔲 Not started |
 
@@ -247,7 +247,7 @@ Downloader Bot/
 - Consider whether `PROJECT_ROADMAP.md`'s Phase 0 decisions table should get a note about the `python-telegram-bot` version bump, per Rule 8 (documentation currency) — not yet done, low urgency since `requirements.txt` is self-documenting for this.
 - ~~No fallback/unrecognized-message handler exists yet~~ — **resolved in Step 5**: `handle_url_message` now replies to any plain text message (URL or not), so this is no longer an open item.
 - The Step 5 delivery for this round used direct file delivery (via `present_files`) rather than a `.patch`, since Moeid reported not receiving the patch output — worth confirming at the start of future delivery rounds whether patch or direct file content is landing correctly, rather than assuming the patch workflow silently worked.
-- **Step 6 (Instagram downloading) has not been manually verified against a real Instagram URL.** Unlike Steps 4 and 5, which both have a "manually verified working against real Telegram" note with a date, `downloader/instagram.py` has only been exercised against a fake `yt_dlp.YoutubeDL` in the sandbox test suite. Moeid should try `download_instagram_video()` against a real public post/reel URL (e.g. from a throwaway script or a REPL) before this is considered done in the same sense Steps 4/5 are - anonymous yt-dlp extraction is exactly the kind of thing that can pass every mocked test and still fail against Instagram's actual current behavior.
+- ~~Step 6 (Instagram downloading) has not been manually verified against a real Instagram URL.~~ — **resolved Sept 21 2026**: `download_instagram_video()` was run against a real public reel (`https://www.instagram.com/reel/DdiDlPkNLjk/`), successfully downloaded and merged via FFmpeg to `downloads/DdiDlPkNLjk.mp4`, and confirmed to play correctly at good quality. Tested via a throwaway `manual_test_instagram.py` script (not part of the repo/test suite - intentionally outside pytest since it hits the real network). Along the way, found and fixed a broken `.env` on Moeid's machine: the file contained the literal PowerShell heredoc script from `.env.example` (including the `@'` / `'@ | Set-Content...` wrapper lines) instead of parsed `KEY=value` pairs - this caused `FFMPEG_PATH` to silently fall back to the `'ffmpeg'` default and triggered a persistent `python-dotenv could not parse statement starting at line 14` warning. Worth double-checking `.env` is now clean (no leftover malformed lines) next session.
 
 ---
 
