@@ -28,7 +28,7 @@ Full rationale and the complete 9-phase plan live in `PROJECT_ROADMAP.md` (repo 
 | Language (SQLite persistence, get/has/set) | ✅ Done (Steps 2–3) |
 | Config loading (`Settings`, `.env`) | ✅ Done (Step 1) |
 | URL handling / platform detection (Step 5) | ✅ Done — **manually verified working against real Telegram**, Sept 17 2026 |
-| Instagram downloading (Step 6) | ✅ Done — **manually verified working against a real Instagram reel**, Sept 21 2026 (anonymous yt-dlp extraction + FFmpeg merge, confirmed playable output) |
+| Instagram downloading (Step 6) | ✅ Done — **manually verified working against a real Instagram reel**, Sept 21 2026 (anonymous yt-dlp extraction + FFmpeg merge, confirmed playable output). Currently videos only; picture/carousel support to be added later. |
 | YouTube downloading + quality menu | 🔲 Not started — **next up** |
 | Delivery + cleanup | 🔲 Not started |
 
@@ -78,7 +78,7 @@ Downloader Bot/
 │   └── settings.py         # frozen Settings dataclass, Settings.from_env(), module singleton `settings`
 ├── downloader/
 │   ├── __init__.py
-│   ├── instagram.py        # download_instagram_video() — anonymous yt-dlp extraction, Step 6, done
+│   ├── instagram.py        # download_instagram_video() — anonymous yt-dlp extraction, Step 6, done + verified
 │   ├── youtube.py          # empty — Phase 1 upcoming, next
 │   └── manager.py          # Platform enum + detect_platform() — Step 5, done
 ├── services/
@@ -97,7 +97,7 @@ Downloader Bot/
 │   ├── test_handlers_url.py        # handle_url_message(), detect_platform mocked — 4 tests
 │   ├── test_manager.py             # detect_platform(), pure unit tests — 25 tests
 │   ├── test_run.py                 # check_ffmpeg()
-│   ├── test_instagram.py           # download_instagram_video(), fake yt_dlp.YoutubeDL — 15 tests, new in Step 6
+│   ├── test_instagram.py           # download_instagram_video(), fake yt_dlp.YoutubeDL — 15 tests, Step 6
 │   └── test_video_service.py       # empty stub
 ├── downloads/.gitkeep
 ├── logs/.gitkeep
@@ -157,7 +157,9 @@ Downloader Bot/
 - All yt-dlp failures (`yt_dlp.utils.DownloadError`) are caught and re-raised as a single `InstagramDownloadError`, chained via `from exc` - callers (eventually `services/video_service.py`) only need to handle one exception type regardless of the underlying yt-dlp failure mode.
 - **No cookie/session options are set anywhere in this module** (Phase 1 = anonymous only). A later phase can add optional authentication by extending `_build_ydl_opts()`'s returned dict (e.g. a `cookiefile` key) without changing `download_instagram_video()`'s public signature - this is the "architecture leaves room for auth later" requirement from Phase 0, made concrete.
 - **Not yet wired into the bot.** This module only implements the download step in isolation; `bot/handlers.py`, `services/video_service.py`, and `services/file_service.py` are unchanged, so a real Instagram URL sent to the bot still gets the Step 5 placeholder reply today. Wiring this in is part of the separate "Delivery" work, which naturally comes after both downloaders (Instagram + YouTube) exist.
+- **Scope note:** current implementation targets video posts/reels only. Picture posts and carousels are explicitly deferred to a later pass (per Moeid).
 - 15 unit tests in `tests/test_instagram.py`, all against a fake `yt_dlp.YoutubeDL` (no real network calls, no real yt-dlp extraction) - covering the happy path, both filepath-resolution branches, download-dir handling (default + explicit override + auto-creation), the exact yt-dlp options passed (format, merge format, ffmpeg path, no-cookies), and error wrapping/chaining.
+- **Manually verified Sept 21 2026** against a real public reel (`https://www.instagram.com/reel/DdiDlPkNLjk/`) via a throwaway `manual_test_instagram.py` script (not part of the repo - hits the real network intentionally outside pytest). Successfully downloaded and FFmpeg-merged to `downloads/DdiDlPkNLjk.mp4`; confirmed to play correctly at good quality.
 
 ### `bot/keyboards.py`
 - `LANGUAGE_CALLBACK_PREFIX = "set_lang:"` — callback_data is `f"{LANGUAGE_CALLBACK_PREFIX}{lang_code}"`, e.g. `"set_lang:fa"`.
@@ -175,7 +177,7 @@ Downloader Bot/
 - `handle_url_message(update, context)` (Step 5):
   - Registered as a catch-all `MessageHandler(filters.TEXT & ~filters.COMMAND, ...)` — fires on any plain text message that isn't a slash command, so `/start` and other commands are unaffected.
   - Looks up the sender's saved language via `get_language(user_id)`, calls `detect_platform(update.message.text)` from `downloader/manager.py`, and replies with the matching translation (`url.detected_youtube` / `url.detected_instagram` / `url.unsupported`) via a small `_PLATFORM_TRANSLATION_KEYS` dict mapping `Platform` → translation key.
-  - Does **not** download anything — `downloader/youtube.py` and `downloader/instagram.py` are still empty. This only closes the detection loop end-to-end (user gets a clear reply instead of silence); actual downloading is later Phase 1 work.
+  - Does **not** download anything — `downloader/youtube.py` is still empty, and even though `downloader/instagram.py` now works standalone (Step 6), it is not called from here yet. This only closes the detection loop end-to-end (user gets a clear reply instead of silence); actual wiring to downloading is later Phase 1 "Delivery" work.
 - `register_handlers(application)` — registers, in order: `CommandHandler("start", start)`, `CallbackQueryHandler(handle_language_selection, pattern=f"^{LANGUAGE_CALLBACK_PREFIX}")`, then `MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url_message)`. Order matters in `python-telegram-bot` — commands and callback buttons are matched before the catch-all text handler gets a chance to see the update.
 
 ### `run.py`
@@ -192,7 +194,8 @@ Downloader Bot/
 - Async handler tests use `@pytest.mark.asyncio` explicitly on each test (no `pytest.ini`/`asyncio_mode=auto` added — kept minimal, avoided introducing a new config file for something explicit decorators already solve).
 - `MagicMock`/`AsyncMock` are used to fake python-telegram-bot's `Update`/`Context` objects rather than constructing real ones — keeps tests fast and decoupled from the library's actual object graphs.
 - Pure-function modules (no Telegram/SQLite involved) get straightforward `pytest.mark.parametrize` unit tests with no mocking at all — see `test_manager.py`, which is the simplest test file in the project by design (`detect_platform()` takes a string, returns an enum, nothing to fake).
-- **Current test count: 79 passing**, confirmed via a full sandbox rebuild + `pytest tests/ -v` run through Step 6. (The previous "60" note here undercounted even Step 5's own parametrized tests - actual count through Step 5 was 64, not 60; the two `pytest.mark.parametrize` files expand to more cases than a flat per-file guess suggests. Lesson reaffirmed: recount via the real `pytest -v` output rather than trusting a hand-tallied number in this file.) Breakdown as of Step 6: `test_settings.py` (6), `test_language_service.py` (8), `test_translations.py` (13, parametrized over 7 keys plus 6 direct tests), `test_handlers.py` (4), `test_handlers_integration.py` (2), `test_run.py` (2), `test_manager.py` (25, parametrized), `test_handlers_url.py` (4), `test_instagram.py` (15, new in Step 6), plus empty stub files (`test_video_service.py`, `test_youtube.py`) contributing 0. Treat this number as current as of Step 6; recount rather than trust it blindly once more steps land.
+- yt-dlp-based downloader tests (see `test_instagram.py`) fake the whole `yt_dlp.YoutubeDL` class - no real network calls, no real extraction. Real-world correctness is checked separately via a throwaway manual script run once against a live URL, never as part of the pytest suite.
+- **Current test count: 79 passing**, confirmed via a full sandbox rebuild + `pytest tests/ -v` run through Step 6. Breakdown: `test_settings.py` (6), `test_language_service.py` (8), `test_translations.py` (13, parametrized over 7 keys plus 6 direct tests), `test_handlers.py` (4), `test_handlers_integration.py` (2), `test_run.py` (2), `test_manager.py` (25, parametrized), `test_handlers_url.py` (4), `test_instagram.py` (15, Step 6), plus empty stub files (`test_video_service.py`, `test_youtube.py`) contributing 0. Treat this number as current as of Step 6; recount rather than trust it blindly once more steps land.
 
 ---
 
@@ -202,8 +205,9 @@ Downloader Bot/
 - **Python:** 3.14.4 (real machine) — sandbox verification during development used 3.12 (close enough for logic verification, but **cannot** catch Python-3.14-specific runtime issues; see Issue #2 below, which only surfaced on the real machine).
 - **Venvs:** `.venv` is the active one; a stray `venv` also exists and was flagged for cleanup (not yet done, low priority).
 - **FFmpeg:** binary at `D:\Program Files\ffmpeg-2026-08-30_full_build\bin`. Windows PATH issues are a known category of subtle failure here — stale terminal sessions, System vs. User PATH scope, and the ~2047-char PATH length limit are all real suspects if `ffmpeg` mysteriously stops resolving despite correct registry entries.
-- **Core stack versions actually in use:** see `requirements.txt` — currently `python-telegram-bot==22.8` (bumped from `21.6`, see Issue #2), `yt-dlp==2026.8.19`, `python-dotenv==1.0.1`, `pytest==8.3.3`, `pytest-asyncio==0.24.0`.
-- **Change delivery workflow:** discuss approach in chat → Moeid picks → Claude builds+tests in sandbox → Claude generates a `.patch` via `git diff --cached`, verifies clean apply on a fresh tree → Claude presents the `.patch` → Moeid applies with `git apply`. **Caveat learned the hard way (see Issue #3): this doesn't always work cleanly for edits to existing files** — prefer it for **new files** (low risk, no context-matching needed), fall back to direct instructions/manual edits for small single-line changes to existing files if a patch fails.
+- **Core stack versions actually in use:** see `requirements.txt` — currently `python-telegram-bot==22.8` (bumped from `21.6`, see Issue #2), `yt-dlp==2026.8.19`, `python-dotenv==1.2.2`, `pytest==9.0.3`, `pytest-asyncio==1.4.0`.
+- **Branching:** work happens on short-lived feature branches (`URL-hanling`, `instagram-download`, etc.) merged into `phase-1`; `main` holds the docs/architecture baseline. Always confirm the actual current branch (`git branch --show-current`) before assuming file state — don't assume a doc or module is missing just because it isn't in the branch expected; check `git log --oneline` for merge history first.
+- **Change delivery workflow:** discuss approach in chat → Moeid picks → Claude builds+tests in sandbox → Claude generates a `.patch` via `git diff --cached`, verifies clean apply on a fresh tree → Claude presents the `.patch` → Moeid applies with `git apply`. **Caveat learned the hard way (see Issue #3): this doesn't always work cleanly for edits to existing files** — prefer it for **new files** (low risk, no context-matching needed), fall back to direct instructions/manual edits for small single-line changes to existing files if a patch fails. **For `docs/CLAUDE.md` and `docs/PROJECT_ROADMAP.md` specifically: these are supplied to Claude directly via memory/project context already up to date - Claude must edit that known content directly and hand back the full file, never attempt to fetch or re-derive them from GitHub or assume a different repo layout (see Issue #4).**
 
 ---
 
@@ -227,6 +231,12 @@ Downloader Bot/
 - **Resolution:** abandoned the patch for this specific single-line change; had Moeid edit `requirements.txt` by hand instead (change `21.6` → `22.8` on the one line), then `pip install -r requirements.txt --upgrade`.
 - **Lesson / new working rule:** patches are trustworthy for **new files** (git apply just needs to confirm the path doesn't already exist — no context-matching against existing content, so CRLF/whitespace mismatches can't cause a rejection the same way). Patches that **modify a single line or a small existing file** are more fragile on this Windows/CRLF setup and worth defaulting to manual edit instructions instead, at least until the CRLF root cause is actually nailed down. Don't burn more than one troubleshooting round on a trivial single-line patch failure — just give the direct edit.
 
+### Issue #4 — Claude fabricated a root-level `CLAUDE.md`/`PROJECT_ROADMAP.md` layout instead of using the real `docs/` path already known via memory
+- **Symptom:** during Step 6 (Instagram downloading), Claude generated a `.patch` targeting `CLAUDE.md` and `PROJECT_ROADMAP.md` at the repo root. `git apply` failed with `error: CLAUDE.md: No such file or directory` because those files only exist at `docs/CLAUDE.md` and `docs/PROJECT_ROADMAP.md` in this repo - there is no root-level copy. This cost multiple back-and-forth rounds (checking `git status`, `git ls-files`, `git branch --show-current`, and eventually a GitHub screenshot) before the real cause was found.
+- **Root cause:** Claude had the actual, current, correct content of `docs/CLAUDE.md` and `docs/PROJECT_ROADMAP.md` available directly via memory/project context (Moeid updates these regularly for exactly this reason), but instead of editing that known content in place, Claude reconstructed an assumed repo layout from scratch in a sandbox and invented a root+mirror structure that doesn't match this repo.
+- **Resolution:** Claude edited the actual known `docs/` content directly and handed back the complete updated files, with no GitHub lookups, no sandbox repo reconstruction for these two files, and no patch generation against a guessed path.
+- **Lesson / new working rule:** when Claude already has current file content via memory or project context, **use that content directly** - treat it as more reliable than anything Claude would otherwise guess, fetch, or reconstruct. Never re-derive a file's repo path or content from GitHub, a sandbox rebuild, or general assumptions about "typical" project layout when the real content is already sitting in context. If there's genuine doubt about whether memory is current, ask Moeid directly ("is this still accurate?") rather than going and fetching it a different way that risks reintroducing exactly this kind of mismatch.
+
 ---
 
 ## 9. Working relationship / process notes
@@ -234,9 +244,10 @@ Downloader Bot/
 - Moeid wants approaches **discussed and compared before any code is written** — always propose options, get his pick, then build.
 - He explicitly prefers **minimal, non-over-engineered solutions** at this phase — e.g. rejected creating `bot/startup.py` for a single FFmpeg check, rejected adding fallback complexity to translations, rejected JSON/YAML for translations "at this stage."
 - He asked specifically for **real-DB integration test coverage**, not just mocked unit tests, for the language/handlers interaction — worth defaulting to *both* mocked-unit + one real-integration test for future service-layer work, not just mocked tests.
-- He self-tests manually against real Telegram once patches are applied and wants to be walked through exactly how to do that (token setup, `.env`, FFmpeg check, running, what to expect at each step).
+- He self-tests manually against real Telegram (or, for downloaders, via a throwaway script) once patches are applied and wants to be walked through exactly how to do that (token setup, `.env`, FFmpeg check, running, what to expect at each step).
 - When something doesn't work, he'll paste raw terminal output/tracebacks — read them carefully for the *actual* failing line before proposing fixes (e.g. Issue #2 required reading the PTB traceback down to the literal `asyncio.get_event_loop()` line, not just pattern-matching on the visible `RuntimeError` text).
 - He's willing to do manual/hand edits when patches misbehave rather than insisting on patch purity — don't over-invest in fixing a fragile patch when a two-line manual instruction solves it just as well.
+- **He maintains `docs/CLAUDE.md` and `docs/PROJECT_ROADMAP.md` explicitly so Claude always has current project memory without needing to fetch anything** - he is (understandably) frustrated when Claude ignores that and goes to GitHub or reconstructs assumed file layouts instead, since it wastes his time and tokens for no benefit. Default to trusting and editing the content already in context; only go looking elsewhere if Moeid says the context is stale.
 
 ---
 
@@ -244,17 +255,17 @@ Downloader Bot/
 
 - Duplicate venv cleanup (`.venv` vs `venv`) — flagged, not done.
 - The CRLF/`git apply` fragility (Issue #3) isn't root-caused. If it recurs on a larger patch, worth actually diagnosing (e.g. `git config core.autocrlf`, comparing `file <path>` line-ending output, or trying `git apply --whitespace=fix`) rather than falling back to manual edits every time.
-- Consider whether `PROJECT_ROADMAP.md`'s Phase 0 decisions table should get a note about the `python-telegram-bot` version bump, per Rule 8 (documentation currency) — not yet done, low urgency since `requirements.txt` is self-documenting for this.
+- ~~Consider whether `PROJECT_ROADMAP.md`'s Phase 0 decisions table should get a note about the `python-telegram-bot` version bump, per Rule 8 (documentation currency).~~ ✅ Done — added to both `PROJECT_ROADMAP.md` and `docs/PROJECT_ROADMAP.md` (Sept 4, 2026).
 - ~~No fallback/unrecognized-message handler exists yet~~ — **resolved in Step 5**: `handle_url_message` now replies to any plain text message (URL or not), so this is no longer an open item.
-- The Step 5 delivery for this round used direct file delivery (via `present_files`) rather than a `.patch`, since Moeid reported not receiving the patch output — worth confirming at the start of future delivery rounds whether patch or direct file content is landing correctly, rather than assuming the patch workflow silently worked.
-- ~~Step 6 (Instagram downloading) has not been manually verified against a real Instagram URL.~~ — **resolved Sept 21 2026**: `download_instagram_video()` was run against a real public reel (`https://www.instagram.com/reel/DdiDlPkNLjk/`), successfully downloaded and merged via FFmpeg to `downloads/DdiDlPkNLjk.mp4`, and confirmed to play correctly at good quality. Tested via a throwaway `manual_test_instagram.py` script (not part of the repo/test suite - intentionally outside pytest since it hits the real network). Along the way, found and fixed a broken `.env` on Moeid's machine: the file contained the literal PowerShell heredoc script from `.env.example` (including the `@'` / `'@ | Set-Content...` wrapper lines) instead of parsed `KEY=value` pairs - this caused `FFMPEG_PATH` to silently fall back to the `'ffmpeg'` default and triggered a persistent `python-dotenv could not parse statement starting at line 14` warning. Worth double-checking `.env` is now clean (no leftover malformed lines) next session.
+- Instagram picture posts and carousels are not yet supported by `download_instagram_video()` (video-only for now, per Moeid) — explicitly deferred, not a bug.
+- Once YouTube downloading exists, the "Delivery" work (video_service.py, file_service.py, wiring both downloaders into bot/handlers.py, sending files via Telegram, cleanup) becomes the next real milestone - don't start it before YouTube downloading is done, per Rule 7 (both platforms share this pipeline).
 
 ---
 
 ## 11. Quick-reference: how to pick up work in a new session
 
-1. Read this file fully before touching code.
+1. Read this file fully before touching code - this file (and `PROJECT_ROADMAP.md`) are supplied via memory/project context and should be treated as current; don't re-fetch them from GitHub unless Moeid says this content is stale.
 2. Check `PROJECT_ROADMAP.md` §16 ("Current Development Position") to confirm phase.
-3. Re-confirm real file state before assuming anything — Claude does not have persistent access to Moeid's actual repo between sessions; always verify current file contents rather than trusting this document's code excerpts blindly if precision matters (this file describes *intent and history*, not a guaranteed byte-for-byte mirror of the repo).
+3. If something about file state is genuinely unclear (e.g. "does this file exist"), ask Moeid directly rather than guessing at repo layout or going to GitHub - see Issue #4.
 4. Follow the standard workflow: discuss → Moeid picks → build+test in sandbox → patch (new files) or direct instructions (small edits to existing files) → Moeid applies and manually verifies.
 5. Update this file after material progress — new step completed, new decision made, new issue hit and resolved.
