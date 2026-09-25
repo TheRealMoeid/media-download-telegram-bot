@@ -147,13 +147,13 @@ These decisions were made during Phase 0 planning and constrain Phase 1 implemen
 | Language persistence (Phase 1) | SQLite. Accessed only through `services/language_service.py`; no other module touches storage directly. |
 | Translation system | A centralized translation service that resolves a stable **message key** + the user's language code to localized text. The underlying storage format for translated strings (Python dict, JSON, YAML, etc.) is an implementation detail to be chosen in Phase 1, not in Phase 0. |
 | `yt-dlp` version | Pinned in `requirements.txt` at `2026.8.19`. Upgrades are a deliberate, tested action, not automatic. |
-| `python-telegram-bot` version | Not pinned to a specific version by Phase 0 planning; `requirements.txt` originally used `21.6`. Bumped to `22.8` during Phase 1 Step 4 real-machine testing after discovering `21.6` is incompatible with Python 3.14 (itself a Phase 0-pinned decision) — `Application.run_polling()` relies on `asyncio.get_event_loop()` behavior that Python 3.14 removed. Fixed upstream in PTB `22.4+`. Full root-cause writeup in `CLAUDE.md` §8, Issue #2. Future upgrades remain a deliberate, tested action, matching the `yt-dlp` policy above. |
 | FFmpeg | Treated as a required **external system dependency**, not a Python package. The host must have FFmpeg installed and available on `PATH`. Phase 0 only documents this requirement; Phase 1 implements a startup validation check (see Phase 1 tasks) that fails fast with a clear error if FFmpeg is missing, rather than discovering this mid-download. Automatic installation of FFmpeg is explicitly out of scope; if containerized deployment is introduced later, FFmpeg becomes part of the image instead. |
 | Python version | 3.14.4. |
 | Testing framework | `pytest` as the primary framework, with `pytest-asyncio` for the bot's async code paths, and Python's built-in `unittest.mock` for isolating external dependencies (Telegram API, `yt-dlp`, FFmpeg). The standard test suite must not perform real network calls or real downloads; real-download tests, if introduced later, belong to a separate integration-test tier. |
 | Instagram authentication | Phase 1 uses anonymous `yt-dlp` extraction only. The architecture must leave room for optional cookie/session-based authentication in a later phase. Any future credentials must be handled as configuration/secrets (e.g., via `.env`), never hardcoded or surfaced in user-facing Telegram messages. |
 | Logging | Python's stdlib `logging` module. Phase 1 implements basic logging; Phase 2 expands it into the structured/diagnostic logging described in that phase. |
 | YouTube single-quality videos | If a specific YouTube video only exposes one downloadable quality, the bot auto-downloads it rather than presenting a one-item menu, and explicitly tells the user that only one quality was available. This is a UX exception, not a change to the underlying policy: YouTube quality is still always *inspected* per video; the user is only skipped the selection step when there is nothing to select. |
+| YouTube JS-runtime dependency | Not anticipated in Phase 0 planning. As of yt-dlp `2025.11.12+`, an external JavaScript runtime (Deno recommended) is required for full YouTube extraction support. Installed (`deno 2.9.7`) and verified active on Moeid's machine during the Step 7 real-world troubleshooting described in `CLAUDE.md` Issue #5. **Confirmed not sufficient on its own** to resolve the anonymous-extraction bot-check rejection also documented there — a real prerequisite regardless, but not the fix for that separate, still-open issue. |
 
 ## Expected result
 
@@ -243,46 +243,50 @@ Project-specific concepts:
 
 ### Bot foundation
 
-- [ ] Start the Telegram bot.
-- [ ] Implement `/start`.
-- [ ] Implement basic user interaction.
-- [ ] Create the initial main menu.
-- [ ] Validate that FFmpeg is installed and available on `PATH` at startup; fail fast with a clear error if it is not.
+- [✅] Start the Telegram bot.
+- [✅] Implement `/start`.
+- [✅] Implement basic user interaction.
+- [✅] Create the initial main menu.
+- [✅] Validate that FFmpeg is installed and available on `PATH` at startup; fail fast with a clear error if it is not.
 
 ### Language
 
-- [ ] Detect first-time users.
-- [ ] Show Persian/English selection.
-- [ ] Save the selected language (SQLite, accessed only through `language_service.py`).
-- [ ] Load the saved language for returning users.
-- [ ] Add language switching.
-- [ ] Centralize translated strings behind a lookup by message key + language code.
-- [ ] Localize status messages.
-- [ ] Localize errors.
+- [✅] Detect first-time users.
+- [✅] Show Persian/English selection.
+- [✅] Save the selected language (SQLite, accessed only through `language_service.py`).
+- [✅] Load the saved language for returning users.
+- [✅] Add language switching.
+- [✅] Centralize translated strings behind a lookup by message key + language code.
+- [✅] Localize status messages.
+- [✅] Localize errors.
 
 ### URL handling
 
-- [ ] Receive URLs.
-- [ ] Validate basic URL structure.
-- [ ] Detect supported platforms.
-- [ ] Reject unsupported URLs gracefully.
+- [✅] Receive URLs.
+- [✅] Validate basic URL structure.
+- [✅] Detect supported platforms.
+- [✅] Reject unsupported URLs gracefully.
 
 ### Instagram
 
-- [ ] Implement Instagram downloading.
-- [ ] Select the best available quality automatically.
-- [ ] Avoid intentionally reducing quality.
-- [ ] Handle required FFmpeg processing.
+- [✅] Implement Instagram downloading.
+- [✅] Select the best available quality automatically.
+- [✅] Avoid intentionally reducing quality.
+- [✅] Handle required FFmpeg processing.
+
+> ⚠️ **Downloader implemented and verified standalone; not yet wired into `bot/handlers.py`.** A real Instagram URL sent to the bot today still gets the Step 5 placeholder reply, not a video. Wiring this in — sending the file through Telegram, cleanup — is Track A's current work. See `CLAUDE.md` §2.
 
 ### YouTube
 
-- [ ] Extract available formats.
-- [ ] Determine available video qualities.
-- [ ] Display actual available qualities.
-- [ ] Allow the user to select one.
-- [ ] If only one quality is available, skip the menu, auto-download it, and inform the user only one quality existed.
-- [ ] Download the selected quality.
-- [ ] Merge audio/video when necessary.
+- [✅] Extract available formats.
+- [✅] Determine available video qualities.
+- [✅] Display actual available qualities.
+- [✅] Allow the user to select one.
+- [✅] If only one quality is available, skip the menu, auto-download it, and inform the user only one quality existed.
+- [✅] Download the selected quality.
+- [✅] Merge audio/video when necessary.
+
+> ⚠️ **Implementation, UI, and wiring are complete and manually verified end-to-end for every path except a successful real download.** Every real download attempt so far (5 real videos, 2 countries) has failed during extraction with YouTube's anonymous "Sign in to confirm you're not a bot" rejection — this is an active, unresolved, external blocker (`CLAUDE.md` Issue #5), not an implementation gap. The checkboxes above reflect that the code exists, is tested, and behaves correctly whenever extraction itself succeeds; they do not claim a real download has been observed to complete.
 
 ### Delivery
 
@@ -1387,6 +1391,8 @@ The immediate target is:
 ```
 
 The next implementation work should therefore remain focused on this vertical slice.
+
+**Current status (as of the Step 7 / multi-model split):** Language, config, and URL handling are done and verified. Both downloaders (Instagram, YouTube) are implemented and unit-tested; the YouTube quality-selection UI is fully wired and verified end-to-end except for a successful real download, which is currently blocked by an unresolved external YouTube anonymous-extraction issue. Work is now split into two independent parallel tracks — the Instagram delivery pipeline, and the YouTube extraction blocker — run by separate AI model sessions. See `CLAUDE.md` §2 for the live status table, `CLAUDE.md` Issue #5 for the YouTube blocker's full investigation trail, and `AI_COLLABORATION.md` / `MODULES.md` for how the parallel work is coordinated and how a new session (human or AI) should pick up either track without re-deriving context from scratch.
 
 ---
 

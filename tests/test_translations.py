@@ -10,6 +10,13 @@ EXPECTED_KEYS = {
     "url.detected_youtube",
     "url.detected_instagram",
     "url.unsupported",
+    "youtube.choose_quality",
+    "youtube.single_quality_auto",
+    "youtube.download_started",
+    "youtube.download_complete",
+    "youtube.selection_expired",
+    "youtube.extraction_failed",
+    "youtube.download_failed",
 }
 
 
@@ -49,3 +56,38 @@ def test_url_translation_keys_are_nonempty_in_both_languages():
     for key in ("url.detected_youtube", "url.detected_instagram", "url.unsupported"):
         assert translate(key, "en").strip()
         assert translate(key, "fa").strip()
+
+
+def test_youtube_translation_keys_are_nonempty_in_both_languages():
+    for key in (
+        "youtube.choose_quality",
+        "youtube.selection_expired",
+        "youtube.extraction_failed",
+        "youtube.download_failed",
+    ):
+        assert translate(key, "en").strip()
+        assert translate(key, "fa").strip()
+
+
+def test_translate_substitutes_quality_placeholder():
+    assert translate("youtube.download_started", "en", quality="1080p") == (
+        "Downloading 1080p. This may take a moment..."
+    )
+    assert "1080p" in translate("youtube.download_started", "fa", quality="1080p")
+
+
+def test_translate_without_kwargs_leaves_placeholder_templates_unformatted():
+    # Calling without kwargs on a template that has a placeholder would
+    # raise if it were ever accidentally formatted with no arguments;
+    # translate() must only format when kwargs are actually given.
+    raw = TRANSLATIONS["youtube.download_started"]["en"]
+    assert "{quality}" in raw
+
+
+def test_translate_without_kwargs_returns_raw_unformatted_template():
+    # translate() only formats when kwargs are actually passed - calling
+    # it without kwargs on a placeholder-bearing key must not raise, it
+    # should simply hand back the raw template untouched.
+    assert translate("youtube.download_started", "en") == TRANSLATIONS[
+        "youtube.download_started"
+    ]["en"]
