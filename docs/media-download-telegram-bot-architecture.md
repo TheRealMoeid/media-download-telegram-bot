@@ -2,7 +2,7 @@
 
 A modular Python Telegram bot for downloading videos from supported platforms and sending them back to users.
 
-> **Status:** Phase 0 — Planning & Architecture. No implementation exists yet; this document describes the intended design. See [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md) for the full phased development plan and rationale.
+> **Status:** Phase 1 — MVP in progress. Language, config, and URL handling are done; both downloaders (Instagram, YouTube) are implemented; the YouTube quality-selection UI is fully wired. Two tracks are currently in progress in parallel (Instagram delivery, and an open YouTube extraction issue) — see `CLAUDE.md` and `AI_COLLABORATION.md` for current, authoritative status. This document still describes the intended design accurately; only this status line was stale. See [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md) for the full phased development plan and rationale.
 
 ## Core behavior
 

@@ -5,6 +5,15 @@ strings in handlers (see PROJECT_ROADMAP.md, "Translation system"). Kept
 minimal by design for Phase 1: a plain dict, no fallback chains, and no
 external file formats (JSON/YAML) - those remain implementation details
 to introduce later if/when they're actually needed.
+
+translate() also accepts optional keyword arguments, applied via
+str.format(), for the small number of messages that need to embed a
+runtime value (currently: the YouTube quality label, e.g. "1080p").
+This was anticipated in the original design note on `language_set`
+("if a third language were ever added this would need to become a
+template") - the same substitution mechanism now covers the YouTube
+messages that need it. Messages that don't need substitution are
+completely unaffected; translate() only formats when kwargs are given.
 """
 
 from __future__ import annotations
@@ -60,14 +69,51 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "\u067E\u0634\u062A\u06CC\u0628\u0627\u0646\u06CC \u0645\u06CC\u200C\u06A9\u0646\u0645."
         ),
     },
+    # --- YouTube quality-selection (Phase 1, YouTube downloading step) ---
+    "youtube.choose_quality": {
+        "en": "Multiple qualities are available for this video. Please choose one:",
+        "fa": "چند کیفیت مختلف برای این ویدیو موجود است. لطفاً یکی را انتخاب کنید:",
+    },
+    "youtube.single_quality_auto": {
+        "en": "Only one quality was available ({quality}), so I downloaded it automatically.",
+        "fa": "فقط یک کیفیت ({quality}) موجود بود، پس آن را به‌طور خودکار دانلود کردم.",
+    },
+    "youtube.download_started": {
+        "en": "Downloading {quality}. This may take a moment...",
+        "fa": "در حال دانلود {quality}. ممکن است کمی طول بکشد...",
+    },
+    "youtube.download_complete": {
+        "en": "Finished downloading {quality}. \u2705",
+        "fa": "دانلود {quality} به پایان رسید. \u2705",
+    },
+    "youtube.selection_expired": {
+        "en": "This selection has expired or was already used. Please send the YouTube link again.",
+        "fa": "این انتخاب منقضی شده یا قبلاً استفاده شده است. لطفاً لینک یوتیوب را دوباره ارسال کنید.",
+    },
+    "youtube.extraction_failed": {
+        "en": "Sorry, I couldn't check the available qualities for that video. Please try again later.",
+        "fa": "متأسفانه نتوانستم کیفیت‌های موجود این ویدیو را بررسی کنم. لطفاً بعداً دوباره امتحان کنید.",
+    },
+    "youtube.download_failed": {
+        "en": "Sorry, the download failed. Please try again later.",
+        "fa": "متأسفانه دانلود ناموفق بود. لطفاً بعداً دوباره امتحان کنید.",
+    },
 }
 
 
-def translate(key: str, lang: str) -> str:
+def translate(key: str, lang: str, **kwargs: object) -> str:
     """Return the localized string for `key` in `lang`.
 
     Raises KeyError if the key or language is undefined, so a missing
     translation fails loudly during development instead of silently
     falling back to something else.
+
+    If `kwargs` are given, the resolved template is passed through
+    str.format(**kwargs) - e.g. translate("youtube.download_started",
+    "en", quality="1080p"). Templates that don't contain any "{...}"
+    placeholders are unaffected either way.
     """
-    return TRANSLATIONS[key][lang]
+    template = TRANSLATIONS[key][lang]
+    if kwargs:
+        return template.format(**kwargs)
+    return template

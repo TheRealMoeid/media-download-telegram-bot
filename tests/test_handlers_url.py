@@ -1,8 +1,11 @@
-"""Tests for bot/handlers.py's handle_url_message().
+"""Tests for bot/handlers.py's handle_url_message() - non-YouTube paths.
 
 Mocks get_language and detect_platform (service/manager layer), same
 style as the existing language-selection tests in test_handlers.py -
 fast, isolated, no real detection or storage logic exercised here.
+
+YouTube URLs now trigger the full quality-selection flow instead of a
+placeholder reply - see tests/test_handlers_youtube.py for that.
 """
 
 from unittest.mock import AsyncMock, MagicMock
@@ -21,23 +24,6 @@ def make_update_for_message(user_id: int, text: str) -> MagicMock:
     update.message.text = text
     update.message.reply_text = AsyncMock()
     return update
-
-
-@pytest.mark.asyncio
-async def test_youtube_url_gets_youtube_reply_in_users_language(monkeypatch):
-    monkeypatch.setattr(handlers_module, "get_language", lambda user_id: "fa")
-    monkeypatch.setattr(
-        handlers_module, "detect_platform", lambda url: Platform.YOUTUBE
-    )
-
-    update = make_update_for_message(111, "https://youtube.com/watch?v=abc")
-    context = MagicMock()
-
-    await handle_url_message(update, context)
-
-    update.message.reply_text.assert_awaited_once_with(
-        translate("url.detected_youtube", "fa")
-    )
 
 
 @pytest.mark.asyncio

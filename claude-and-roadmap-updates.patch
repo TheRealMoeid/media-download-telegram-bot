@@ -1,0 +1,336 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 6e48e1b..1b70990 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -1,6 +1,8 @@
+ # CLAUDE.md — Project Reference
+ 
+-> **Purpose of this file:** This is Claude's own working reference for the Telegram Video Downloader Bot project. It exists to be read at the start of a session to reconstruct full context — architecture, decisions, current state, open issues, and how Moeid and Claude work together — without relying on chat history being available. Update this file whenever something material changes (a decision, a completed step, a newly discovered issue). Treat it as more authoritative than Claude's memory of past conversations, since this is explicit and versioned; memory can be stale or incomplete.
++> **Purpose of this file:** This is the shared technical reference for the Telegram Video Downloader Bot project — written for Claude originally, but now the authoritative context document for **any AI model** working on this repo (see `AI_COLLABORATION.md` for why multiple models are now involved and how work is divided between them). It exists to be read at the start of a session to reconstruct full context — architecture, decisions, current state, open issues, and how Moeid and the assisting model work together — without relying on chat history being available. Update this file whenever something material changes (a decision, a completed step, a newly discovered issue). Treat it as more authoritative than any model's memory of past conversations, since this is explicit and versioned; memory can be stale or incomplete.
++>
++> **If you are a different AI model picking this up for the first time:** also read `AI_COLLABORATION.md` (how multi-model work is coordinated on this project) and `MODULES.md` (the concrete module map — what you can touch independently, what you can't). Reading only this file is not enough once more than one model is active on the project.
+ 
+ ---
+ 
+@@ -28,13 +30,18 @@ Full rationale and the complete 9-phase plan live in `PROJECT_ROADMAP.md` (repo
+ | Language (SQLite persistence, get/has/set) | ✅ Done (Steps 2–3) |
+ | Config loading (`Settings`, `.env`) | ✅ Done (Step 1) |
+ | URL handling / platform detection (Step 5) | ✅ Done — **manually verified working against real Telegram**, Sept 17 2026 |
+-| Instagram downloading (Step 6) | ✅ Done — **manually verified working against a real Instagram reel**, Sept 21 2026 (anonymous yt-dlp extraction + FFmpeg merge, confirmed playable output). Currently videos only; picture/carousel support to be added later. |
+-| YouTube downloading + quality menu | 🔲 Not started — **next up** |
+-| Delivery + cleanup | 🔲 Not started |
++| Instagram downloading (Step 6) | ✅ Downloader implemented and **manually verified against a real Instagram reel**, Sept 21 2026. **Not yet wired into `bot/handlers.py`** — a real Instagram URL still gets the Step 5 placeholder reply today. |
++| YouTube downloading + quality menu (Step 7) | ✅ Implementation, quality-selection UI, and pending-selection handling are complete, tested (114 automated tests passing), and **manually verified end-to-end for every path except a successful download** — the menu, single-quality auto-download path, stale-menu/double-tap handling, and error messaging have all been confirmed working against real Telegram. **No real download has yet succeeded**: every attempt so far (5 real videos, 2 different countries) fails during extraction with YouTube's anonymous "Sign in to confirm you're not a bot" rejection, across every configured fallback client. See Issue #5 — this is currently an **open, unresolved blocker**, not a documentation gap. |
++| Delivery + cleanup (`services/video_service.py`, `services/file_service.py`) | 🔲 Not started — **currently being worked in parallel across two tracks**, see below. |
+ 
+-**Immediate next task:** YouTube downloading — implement `downloader/youtube.py` to extract available formats and let the user choose a quality (auto-download + notify when only one quality exists, per Rule 5). Delivery (`services/video_service.py`, `services/file_service.py`, sending the file back through Telegram, cleanup) still follows after both downloaders exist, since it's a shared pipeline for both platforms.
++**Current work is split into two independent, parallel tracks** (see `AI_COLLABORATION.md` and `MODULES.md` for the full coordination model):
+ 
+-**Note on Step 6:** `downloader/instagram.py` only implements the download step itself (extract + fetch the best-quality file to disk) - it is not yet wired into `bot/handlers.py` or a video/file service, since that wiring is the separate "Delivery" section of `PROJECT_ROADMAP.md`'s Phase 1 task list, not part of "Instagram downloading" itself. Sending a real Instagram URL to the bot today still gets the Step 5 placeholder reply (`url.detected_instagram`), not an actual download - that's expected until the delivery pipeline is built.
++1. **Track A — Instagram delivery pipeline.** Build `services/video_service.py` and `services/file_service.py`, wire `downloader/instagram.py` into `bot/handlers.py`, send the resulting file back through Telegram, clean up afterward. This does not depend on YouTube working and can proceed to completion on its own.
++2. **Track B — YouTube extraction blocker (Issue #5).** Diagnose and, if possible, fix why real YouTube extraction fails 100% of the time so far. **Scope is confined to `downloader/youtube.py`** — this track must not touch `bot/handlers.py`, `bot/keyboards.py`, or the pending-selection logic, since that layer already works correctly and is owned by whichever track reaches it first for delivery wiring (see `MODULES.md`, "Telegram Bot Layer").
++
++These two tracks were deliberately chosen because they don't share any files in common (see `MODULES.md` for the full dependency map) — they can be run by two different AI models/sessions at the same time without coordination overhead beyond both eventually updating this file.
++
++**Note on Step 6 (Instagram):** `downloader/instagram.py` only implements the download step itself (extract + fetch the best-quality file to disk) — it is not yet wired into `bot/handlers.py` or a video/file service. This is exactly what Track A above closes.
+ 
+ ---
+ 
+@@ -71,34 +78,36 @@ Full rationale and the complete 9-phase plan live in `PROJECT_ROADMAP.md` (repo
+ Downloader Bot/
+ ├── bot/
+ │   ├── __init__.py
+-│   ├── handlers.py         # /start, language-selection callback, register_handlers()
+-│   └── keyboards.py        # language_selection_keyboard()
++│   ├── handlers.py         # /start, language callback, URL handling, YouTube quality-selection callback, register_handlers()
++│   └── keyboards.py        # language_selection_keyboard(), youtube_quality_keyboard()
+ ├── config/
+ │   ├── __init__.py
+ │   └── settings.py         # frozen Settings dataclass, Settings.from_env(), module singleton `settings`
+ ├── downloader/
+ │   ├── __init__.py
+-│   ├── instagram.py        # download_instagram_video() — anonymous yt-dlp extraction, Step 6, done + verified
+-│   ├── youtube.py          # empty — Phase 1 upcoming, next
++│   ├── instagram.py        # download_instagram_video() — anonymous yt-dlp extraction, Step 6, done + verified, not wired
++│   ├── youtube.py          # get_available_qualities() / download_youtube_video() — Step 7, done + tested, extraction currently blocked (Issue #5)
+ │   └── manager.py          # Platform enum + detect_platform() — Step 5, done
+ ├── services/
+ │   ├── __init__.py
+ │   ├── language_service.py # get_language / has_saved_language / set_language — SQLite, only module touching it
+-│   ├── translations.py     # TRANSLATIONS dict + translate(key, lang), incl. url.* keys
+-│   ├── file_service.py     # empty — Phase 1 upcoming
+-│   └── video_service.py    # empty — Phase 1 upcoming
++│   ├── translations.py     # TRANSLATIONS dict + translate(key, lang, **kwargs), incl. url.* and youtube.* keys
++│   ├── file_service.py     # empty — Track A (Instagram delivery), in progress
++│   └── video_service.py    # empty — Track A (Instagram delivery), in progress
+ ├── tests/
+ │   ├── __init__.py
+ │   ├── test_settings.py            # 6 tests
+ │   ├── test_language_service.py    # 8 tests
+-│   ├── test_translations.py        # tests for translate(), incl. url.* keys
+-│   ├── test_handlers.py            # unit tests, service layer mocked
+-│   ├── test_handlers_integration.py# real language_service + tmp SQLite DB, no mocks
+-│   ├── test_handlers_url.py        # handle_url_message(), detect_platform mocked — 4 tests
++│   ├── test_translations.py        # tests for translate(), incl. url.* and youtube.* keys, kwargs formatting — 24 tests
++│   ├── test_handlers.py            # unit tests, service layer mocked — 4 tests
++│   ├── test_handlers_integration.py# real language_service + tmp SQLite DB, no mocks — 2 tests
++│   ├── test_handlers_url.py        # handle_url_message() non-YouTube paths, detect_platform mocked — 3 tests
++│   ├── test_handlers_youtube.py    # YouTube quality-selection flow: menus, callbacks, token/expiry/double-tap — 13 tests
+ │   ├── test_manager.py             # detect_platform(), pure unit tests — 25 tests
+-│   ├── test_run.py                 # check_ffmpeg()
++│   ├── test_run.py                 # check_ffmpeg() — 2 tests
+ │   ├── test_instagram.py           # download_instagram_video(), fake yt_dlp.YoutubeDL — 15 tests, Step 6
+-│   └── test_video_service.py       # empty stub
++│   ├── test_youtube.py             # get_available_qualities()/download_youtube_video(), fallback-chain coverage — 27 tests
++│   └── test_video_service.py       # empty stub — Track A, in progress
+ ├── downloads/.gitkeep
+ ├── logs/.gitkeep
+ ├── run.py                  # entry point: check_ffmpeg(), builds Application, register_handlers(), run_polling()
+@@ -107,6 +116,8 @@ Downloader Bot/
+ ├── requirements.txt
+ ├── README.md
+ ├── PROJECT_ROADMAP.md      # canonical
++├── AI_COLLABORATION.md     # multi-model coordination framework (why/how work is split, handoff rules)
++├── MODULES.md              # concrete module map: ownership, dependencies, integration points
+ └── docs/PROJECT_ROADMAP.md # intentional mirror
+ ```
+ 
+@@ -134,9 +145,11 @@ Downloader Bot/
+ 
+ ### `services/translations.py`
+ - Kept intentionally minimal per explicit instruction: plain dict `TRANSLATIONS: dict[str, dict[str, str]]`, no fallback chains, no JSON/YAML.
+-- `translate(key, lang) -> str` — raises `KeyError` on unknown key or language (fail loudly, not silently).
++- `translate(key, lang, **kwargs) -> str` — raises `KeyError` on unknown key or language (fail loudly, not silently). **Signature changed in Step 7**: now accepts optional keyword arguments, applied via `str.format(**kwargs)`, for the handful of messages that need to embed a runtime value (currently: the YouTube quality label, e.g. `translate("youtube.download_started", "en", quality="1080p")`). Calling without kwargs behaves exactly as before — a template containing `{quality}` is simply returned unformatted if no kwargs are passed, it does not raise. This was anticipated in the original `language_set` design note ("if a third language were ever added this would become a template") — the same mechanism now covers the YouTube messages that need it.
+ - Keys as of Step 4: `welcome`, `welcome_back`, `choose_language`, `language_set`.
+-- Keys added in Step 5: `url.detected_youtube`, `url.detected_instagram`, `url.unsupported` — used by `handle_url_message` in `bot/handlers.py`. Dotted key names are just a naming convention (grouping by feature), not a nested-lookup mechanism — `TRANSLATIONS` is still a flat single-level dict keyed by the full string.
++- Keys added in Step 5: `url.detected_youtube`, `url.detected_instagram`, `url.unsupported` — used by `handle_url_message` in `bot/handlers.py`.
++- Keys added in Step 7: `youtube.choose_quality`, `youtube.single_quality_auto`, `youtube.download_started`, `youtube.download_complete`, `youtube.selection_expired`, `youtube.extraction_failed`, `youtube.download_failed` — used by the YouTube quality-selection flow in `bot/handlers.py`. The `youtube.single_quality_auto`, `youtube.download_started`, and `youtube.download_complete` keys take the `quality` kwarg described above.
++- Dotted key names (`url.*`, `youtube.*`) are just a naming convention (grouping by feature), not a nested-lookup mechanism — `TRANSLATIONS` is still a flat single-level dict keyed by the full string.
+ - `language_set` is **not parameterized** — it's just two fixed strings, one per language, each already saying "set to [that language]" in that language. This works because there are only two languages; if a third language were ever added this would need to become a template instead of two hardcoded full sentences.
+ - Handlers must never hardcode user-facing strings — always go through `translate()`.
+ 
+@@ -145,7 +158,7 @@ Downloader Bot/
+ - `detect_platform(url: str) -> Platform` — pure function, no I/O, no Telegram objects. Validates general URL shape via `urllib.parse.urlparse` (must have `http`/`https` scheme + a netloc), then matches the lowercased hostname against `YOUTUBE_HOSTS` / `INSTAGRAM_HOSTS` domain sets.
+ - **Never raises.** Malformed input, non-string input, and unrecognized domains all return `Platform.UNKNOWN` — detection "failure" is a normal, expected outcome (users can paste anything), not an error condition.
+ - `YOUTUBE_HOSTS` covers `youtube.com`, `www.youtube.com`, `m.youtube.com`, `youtu.be`, `www.youtu.be`. `INSTAGRAM_HOSTS` covers `instagram.com`, `www.instagram.com`.
+-- Scope is intentionally narrow (Rule 3/7): detection only. Does not call `yt-dlp`, does not select/invoke a downloader implementation — `downloader/youtube.py` and `downloader/instagram.py` are still empty stubs. That wiring is later Phase 1 work.
++- Scope is intentionally narrow (Rule 3/7): detection only. Does not call `yt-dlp`, does not select/invoke a downloader implementation — `downloader/youtube.py` and `downloader/instagram.py` are the actual downloader implementations, called from `bot/handlers.py`, not from this module.
+ - 24 unit tests in `tests/test_manager.py` covering all host variants, malformed/empty/non-URL input, non-string input, whitespace handling, and unsupported domains.
+ 
+ ### `downloader/instagram.py` (Step 6)
+@@ -156,14 +169,29 @@ Downloader Bot/
+ - The actual downloaded filepath is resolved via `info["requested_downloads"][0]["filepath"]` when present (this reflects the true final path after any FFmpeg merge changes the extension), falling back to `ydl.prepare_filename(info)` otherwise.
+ - All yt-dlp failures (`yt_dlp.utils.DownloadError`) are caught and re-raised as a single `InstagramDownloadError`, chained via `from exc` - callers (eventually `services/video_service.py`) only need to handle one exception type regardless of the underlying yt-dlp failure mode.
+ - **No cookie/session options are set anywhere in this module** (Phase 1 = anonymous only). A later phase can add optional authentication by extending `_build_ydl_opts()`'s returned dict (e.g. a `cookiefile` key) without changing `download_instagram_video()`'s public signature - this is the "architecture leaves room for auth later" requirement from Phase 0, made concrete.
+-- **Not yet wired into the bot.** This module only implements the download step in isolation; `bot/handlers.py`, `services/video_service.py`, and `services/file_service.py` are unchanged, so a real Instagram URL sent to the bot still gets the Step 5 placeholder reply today. Wiring this in is part of the separate "Delivery" work, which naturally comes after both downloaders (Instagram + YouTube) exist.
++- **Not yet wired into the bot.** This module only implements the download step in isolation; `bot/handlers.py`, `services/video_service.py`, and `services/file_service.py` do not call it yet, so a real Instagram URL sent to the bot still gets the Step 5 placeholder reply today. **This is exactly what Track A (Instagram delivery pipeline) closes** — see §2 and `MODULES.md`. Unlike the original plan, this no longer waits on YouTube downloading; the two are being worked in parallel (Moeid's explicit decision, given the YouTube extraction blocker in Issue #5).
+ - **Scope note:** current implementation targets video posts/reels only. Picture posts and carousels are explicitly deferred to a later pass (per Moeid).
+ - 15 unit tests in `tests/test_instagram.py`, all against a fake `yt_dlp.YoutubeDL` (no real network calls, no real yt-dlp extraction) - covering the happy path, both filepath-resolution branches, download-dir handling (default + explicit override + auto-creation), the exact yt-dlp options passed (format, merge format, ffmpeg path, no-cookies), and error wrapping/chaining.
+ - **Manually verified Sept 21 2026** against a real public reel (`https://www.instagram.com/reel/DdiDlPkNLjk/`) via a throwaway `manual_test_instagram.py` script (not part of the repo - hits the real network intentionally outside pytest). Successfully downloaded and FFmpeg-merged to `downloads/DdiDlPkNLjk.mp4`; confirmed to play correctly at good quality.
+ 
++### `downloader/youtube.py` (Step 7)
++- `QualityOption` — frozen dataclass: `format_id` (a yt-dlp format *selector* string, e.g. `"137+bestaudio/best"` — opaque to every caller outside this module), `label` (e.g. `"1080p"`, what a button displays), `height` (raw resolution, for sorting/tests only), `client` (which anonymous yt-dlp "player client" produced this option — `None` for yt-dlp's own default, otherwise one of `_FALLBACK_CLIENTS`; opaque to every caller outside this module — see below).
++- `get_available_qualities(url) -> list[QualityOption]` — inspects the real formats for `url` (Rule 5: never assume qualities), dedupes by height (keeps the highest-bitrate format at each resolution, falling back to filesize when bitrate is missing), filters out audio-only formats, and appends `+bestaudio/best` to the selector when a format is video-only. Returns highest-to-lowest sorted.
++- `download_youtube_video(url, option, download_dir=None) -> str` — **signature takes the whole `QualityOption`, not a bare format string** — downloads `url` using exactly the format and client recorded on `option`, and returns the path to the file on disk. Uses `settings.ffmpeg_path` explicitly, same pattern as Instagram.
++- **Anonymous bot-check fallback chain (added after real-world testing hit YouTube's "Sign in to confirm you're not a bot" rejection — see Issue #5):** `get_available_qualities()` tries yt-dlp's own default anonymous behavior first (richest format list when YouTube allows it), and only falls back to a short, fixed, internal list of alternate anonymous "player client" identifiers — `_FALLBACK_CLIENTS = ("android", "ios", "tv")`, tried in that order — if the default is blocked by what looks like YouTube's bot-check, or exposes zero usable video formats. First success wins outright; formats from different clients are never merged; only two or three attempts are ever made (not a general client-enumeration strategy — Rule 3/7).
++- **"Same successful context" guarantee:** whichever client succeeded during extraction is recorded on every `QualityOption` returned. `download_youtube_video()` reuses that exact client and makes exactly one attempt — no retry loop on download — so the quality menu and the actual download can never disagree about which anonymous client's view of the video they're based on.
++- **Client identifiers never leak outside this module.** `bot/handlers.py` and `bot/keyboards.py` only ever see and pass around whole `QualityOption` objects opaquely — they never read, branch on, or display `.client` or `.format_id`.
++- **Anonymous-only, still.** Nothing in this module ever sets `cookiefile`, `cookiesfrombrowser`, `username`, `password`, or any other authentication-related yt-dlp option — this is a checked invariant in the test suite (`test_no_authentication_options_appear_during_a_full_fallback_run`), not just a convention. Any future cookie/session support is a separate, explicit architectural decision for a later phase (Phase 0 decision, unchanged).
++- All yt-dlp failures are wrapped: `YouTubeExtractionError` (extraction/inspection failed — either every client attempt failed, or every attempt succeeded but exposed zero usable formats) and `YouTubeDownloadError` (the actual download failed), both chained via `from exc`, mirroring `InstagramDownloadError`'s pattern.
++- 27 unit tests in `tests/test_youtube.py`, all against a fake `yt_dlp.YoutubeDL` with a FIFO-scripted sequence of outcomes per attempt (so a single test can express "first attempt blocked, second succeeds"). Covers dedup/normalization logic, default-success, fallback-after-bot-check, fallback-after-empty-formats, stop-at-first-success (never over-tries), full-exhaustion, non-bot-check-errors-don't-retry, the "same client" guarantee on download, and the no-auth-keys regression check.
++- **⚠️ Known blocker (Issue #5, unresolved as of this writing):** every real download attempt so far — 5 real videos, 2 different countries — has failed during extraction with YouTube's "Sign in to confirm you're not a bot" rejection, across every configured client. The fallback loop itself is confirmed working correctly (tried each client once, in order, wrapped the failure cleanly, no raw yt-dlp text leaked to the user); the failure is in what YouTube is actually returning, not in this module's logic. Root cause is **not yet confirmed** — see Issue #5 for the full investigation trail (external JS-runtime requirement ruled out; VPN/IP theory suspected by the assisting model but explicitly disputed by Moeid and not yet tested either way). **Any model picking up Track B (the YouTube extraction fix) must read Issue #5 in full before proposing anything** — several plausible-looking fixes have already been tried and ruled out.
++
+ ### `bot/keyboards.py`
+ - `LANGUAGE_CALLBACK_PREFIX = "set_lang:"` — callback_data is `f"{LANGUAGE_CALLBACK_PREFIX}{lang_code}"`, e.g. `"set_lang:fa"`.
+ - `language_selection_keyboard()` returns an `InlineKeyboardMarkup` with one row: 🇮🇷 فارسی / 🇺🇸 English.
++- `YOUTUBE_QUALITY_CALLBACK_PREFIX = "yt_quality:"` (Step 7) — callback_data is `f"{YOUTUBE_QUALITY_CALLBACK_PREFIX}{token}:{index}"`, e.g. `"yt_quality:AbC123xy:0"`. **Deliberately carries only a token and a list index — never the URL or a raw yt-dlp format id** — see `bot/handlers.py`'s pending-selection notes below for why.
++- `youtube_quality_keyboard(token, options)` (Step 7) — builds one button per row from the real `QualityOption` list `get_available_qualities()` returned for that specific video; never invents or assumes qualities. This function only builds the layout — it doesn't decide what qualities exist (that's `downloader/youtube.py`) and doesn't validate a tap afterwards (that's `bot/handlers.py`).
++- **Callback prefixes must stay distinct.** Any future interactive feature needs its own callback-data prefix — `register_handlers()` matches callbacks by regex prefix, in registration order, so two features sharing a prefix (or one being a substring-match of another) would misroute taps. See `MODULES.md` for the full registered-prefix list before adding a new one.
+ 
+ ### `bot/handlers.py`
+ - `start(update, context)`:
+@@ -174,11 +202,20 @@ Downloader Bot/
+   - **Order matters:** calls `set_language(user_id, lang)` first, *then* sends the confirmation — confirmation must reflect the just-saved state, not stale state. This is asserted directly in `test_language_selection_saves_before_confirming`.
+   - Confirmation is sent as a **new message** (not an edit of the keyboard message) — explicit decision from Moeid.
+   - Confirmation text is always `translate("language_set", lang)` using the **newly selected** `lang`, never whatever was active before.
+-- `handle_url_message(update, context)` (Step 5):
++- `handle_url_message(update, context)` (Step 5, extended in Step 7):
+   - Registered as a catch-all `MessageHandler(filters.TEXT & ~filters.COMMAND, ...)` — fires on any plain text message that isn't a slash command, so `/start` and other commands are unaffected.
+-  - Looks up the sender's saved language via `get_language(user_id)`, calls `detect_platform(update.message.text)` from `downloader/manager.py`, and replies with the matching translation (`url.detected_youtube` / `url.detected_instagram` / `url.unsupported`) via a small `_PLATFORM_TRANSLATION_KEYS` dict mapping `Platform` → translation key.
+-  - Does **not** download anything — `downloader/youtube.py` is still empty, and even though `downloader/instagram.py` now works standalone (Step 6), it is not called from here yet. This only closes the detection loop end-to-end (user gets a clear reply instead of silence); actual wiring to downloading is later Phase 1 "Delivery" work.
+-- `register_handlers(application)` — registers, in order: `CommandHandler("start", start)`, `CallbackQueryHandler(handle_language_selection, pattern=f"^{LANGUAGE_CALLBACK_PREFIX}")`, then `MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url_message)`. Order matters in `python-telegram-bot` — commands and callback buttons are matched before the catch-all text handler gets a chance to see the update.
++  - Looks up the sender's saved language via `get_language(user_id)`, calls `detect_platform(update.message.text)`. **YouTube URLs are handed off to `_handle_youtube_url()`** for the full quality-selection flow (see below). Instagram and unrecognized links still get the Step 5 placeholder reply (`url.detected_instagram` / `url.unsupported`) via the `_PLATFORM_TRANSLATION_KEYS` dict — Instagram's downloader exists but isn't wired in here yet (that's Track A).
++- `_handle_youtube_url(update, context, url, lang)` (Step 7):
++  - **Always drops any previously pending YouTube selection for this user first** (`context.user_data.pop(_PENDING_YOUTUBE_KEY, None)`), *before* deciding what to do with the new URL — this is what makes an old menu's button read as "expired" the moment a new YouTube link is sent, regardless of whether the new link turns out to be single- or multi-quality.
++  - Calls `get_available_qualities(url)`. Extraction failure or zero usable formats → `translate("youtube.extraction_failed", lang)`.
++  - Exactly one quality → auto-download via `_download_youtube_and_report(..., single_quality=True)` and say so explicitly (Rule 5's exception — never a one-item menu).
++  - Multiple qualities → generates a fresh `secrets.token_urlsafe(8)` token, stores `{"token": token, "url": url, "options": options}` under `_PENDING_YOUTUBE_KEY` in `context.user_data`, and shows `youtube_quality_keyboard(token, options)`.
++- **Pending-selection design (Step 7) — read this before touching any of it:**
++  - State lives in `context.user_data` (python-telegram-bot's own per-user dict) under the key `_PENDING_YOUTUBE_KEY = "pending_youtube_selection"` — **at most one pending YouTube selection per user, by construction**. This is in-memory only; it does not survive a bot restart, and that's an accepted Phase 1 tradeoff (no DB, no queue, no custom cache — Rule 3).
++  - `handle_youtube_quality_selection(update, context)` parses `token` and `index` out of `callback_query.data`, then: no pending entry at all (bot restarted, or nothing was ever pending) → expired message. Pending entry exists but its token doesn't match (superseded by a newer URL, or a stale button from an old menu) → expired message, **and the still-current pending selection is left untouched** — a stale tap must never clobber a legitimately pending one. Token matches → **the pending entry is deleted immediately, before the download starts** — this is what makes a double-tap on the same button safe: the second update (whether it arrives before or after the first download finishes) always finds nothing pending and gets the expired message instead of triggering a second download.
++  - Out-of-range index (shouldn't happen from our own keyboard, but a malformed/tampered `callback_data` is still just an invalid selection, not a crash) → expired message, pending entry also cleared.
++- `_download_youtube_and_report(send, url, option, lang, *, single_quality)` (Step 7) — shared by both the auto-download and user-selected paths so the "announce → download → confirm or report failure" sequence exists in exactly one place. `send` is an async callable (`update.message.reply_text` for the auto-download path, a small wrapper around `context.bot.send_message` for the callback path) — this is what lets one function serve both call sites despite python-telegram-bot's `Message.reply_text` and `Bot.send_message` having different signatures. **Stops at download-to-disk** — does not send the file through Telegram or delete it afterward; that's Track A/Track B's eventual delivery wiring, once each platform reaches that point.
++- `register_handlers(application)` — registers, in order: `CommandHandler("start", start)`, `CallbackQueryHandler(handle_language_selection, pattern="^set_lang:")`, `CallbackQueryHandler(handle_youtube_quality_selection, pattern="^yt_quality:")`, then `MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url_message)`. Order matters in `python-telegram-bot` — commands and callback buttons are matched before the catch-all text handler gets a chance to see the update. The two callback patterns are non-overlapping prefixes (`set_lang:` vs `yt_quality:`), confirmed not to cross-match.
+ 
+ ### `run.py`
+ - `check_ffmpeg(ffmpeg_path)` — small, standalone, directly-testable function using `shutil.which()`. Raises `RuntimeError` with a clear message if not found. Deliberately **not** a separate `bot/startup.py` module — Moeid's explicit call: not worth a new module for one Phase 1 check.
+@@ -194,8 +231,8 @@ Downloader Bot/
+ - Async handler tests use `@pytest.mark.asyncio` explicitly on each test (no `pytest.ini`/`asyncio_mode=auto` added — kept minimal, avoided introducing a new config file for something explicit decorators already solve).
+ - `MagicMock`/`AsyncMock` are used to fake python-telegram-bot's `Update`/`Context` objects rather than constructing real ones — keeps tests fast and decoupled from the library's actual object graphs.
+ - Pure-function modules (no Telegram/SQLite involved) get straightforward `pytest.mark.parametrize` unit tests with no mocking at all — see `test_manager.py`, which is the simplest test file in the project by design (`detect_platform()` takes a string, returns an enum, nothing to fake).
+-- yt-dlp-based downloader tests (see `test_instagram.py`) fake the whole `yt_dlp.YoutubeDL` class - no real network calls, no real extraction. Real-world correctness is checked separately via a throwaway manual script run once against a live URL, never as part of the pytest suite.
+-- **Current test count: 79 passing**, confirmed via a full sandbox rebuild + `pytest tests/ -v` run through Step 6. Breakdown: `test_settings.py` (6), `test_language_service.py` (8), `test_translations.py` (13, parametrized over 7 keys plus 6 direct tests), `test_handlers.py` (4), `test_handlers_integration.py` (2), `test_run.py` (2), `test_manager.py` (25, parametrized), `test_handlers_url.py` (4), `test_instagram.py` (15, Step 6), plus empty stub files (`test_video_service.py`, `test_youtube.py`) contributing 0. Treat this number as current as of Step 6; recount rather than trust it blindly once more steps land.
++- yt-dlp-based downloader tests (`test_instagram.py`, `test_youtube.py`) fake the whole `yt_dlp.YoutubeDL` class - no real network calls, no real extraction. `test_youtube.py` extends this pattern with a FIFO-scripted sequence of outcomes per attempt, so a single test can express "first client attempt blocked, second succeeds" — needed once `downloader/youtube.py` gained its multi-attempt fallback chain (Step 7). Real-world correctness is checked separately via a throwaway manual script run once against a live URL, never as part of the pytest suite.
++- **Current test count: 114 passing**, confirmed via a full `pytest tests/ -v` run after Step 7 (the YouTube quality-selection flow, including the fallback-chain rewrite). Individually-confirmed counts worth trusting as exact: `test_youtube.py` (27), `test_handlers_youtube.py` (13, new file), `test_translations.py` (24, up from 13 after the Step 7 key additions). The remaining files (`test_settings.py`, `test_language_service.py`, `test_handlers.py`, `test_handlers_integration.py`, `test_handlers_url.py`, `test_manager.py`, `test_run.py`, `test_instagram.py`) were not touched during Step 7 and should be close to their Step 6 figures, but **don't trust a hand-reconstructed per-file sum from this document** — a manual attempt to reconcile all the individual numbers against the confirmed grand total of 114 did not cleanly add up, most likely due to a stale figure for one of the untouched files rather than an actual test-count problem. Run `pytest tests/ -v` (or `--collect-only -q` for a fast count-only pass) to get an exact fresh breakdown rather than trusting this table blindly — same standing advice as after Step 6.
+ 
+ ---
+ 
+@@ -205,7 +242,9 @@ Downloader Bot/
+ - **Python:** 3.14.4 (real machine) — sandbox verification during development used 3.12 (close enough for logic verification, but **cannot** catch Python-3.14-specific runtime issues; see Issue #2 below, which only surfaced on the real machine).
+ - **Venvs:** `.venv` is the active one; a stray `venv` also exists and was flagged for cleanup (not yet done, low priority).
+ - **FFmpeg:** binary at `D:\Program Files\ffmpeg-2026-08-30_full_build\bin`. Windows PATH issues are a known category of subtle failure here — stale terminal sessions, System vs. User PATH scope, and the ~2047-char PATH length limit are all real suspects if `ffmpeg` mysteriously stops resolving despite correct registry entries.
+-- **Core stack versions actually in use:** see `requirements.txt` — currently `python-telegram-bot==22.8` (bumped from `21.6`, see Issue #2), `yt-dlp==2026.8.19`, `python-dotenv==1.2.2`, `pytest==9.0.3`, `pytest-asyncio==1.4.0`.
++- **Deno (added during YouTube troubleshooting, see Issue #5):** `deno 2.9.7`, installed via `winget install --id=DenoLand.Deno`, confirmed on PATH. Required by yt-dlp `2025.11.12+` for full YouTube support (an external JS runtime is needed to solve YouTube's JS challenge) — **this is a genuine yt-dlp prerequisite regardless of Issue #5's outcome**, but installing it did **not** resolve the "Sign in to confirm you're not a bot" failure; see Issue #5 for the full story. Same PATH-propagation gotcha as FFmpeg: a `winget install` doesn't take effect in terminal sessions already open at the time — always open a fresh terminal before testing.
++- **Local proxy (relevant context for Issue #5):** Moeid's traffic (most apps, including this bot's yt-dlp calls) routes through a local VLESS-based proxy (visible in yt-dlp's debug output as `Proxy map: {'http': 'http://127.0.0.1:10808', ...}`) for censorship-circumvention reasons. This is a real, permanent feature of the environment, not a toggle to casually disable for testing. Whether it's actually contributing to Issue #5 is unconfirmed — see that issue for the full reasoning and Moeid's pushback on this theory.
++- **Core stack versions actually in use:** see `requirements.txt` — currently `python-telegram-bot==22.8` (bumped from `21.6`, see Issue #2), `yt-dlp==2026.8.19` (**confirmed latest on PyPI** as of the Issue #5 investigation — an upgrade alone will not fix that issue), `python-dotenv==1.2.2`, `pytest==9.0.3`, `pytest-asyncio==1.4.0`.
+ - **Branching:** work happens on short-lived feature branches (`URL-hanling`, `instagram-download`, etc.) merged into `phase-1`; `main` holds the docs/architecture baseline. Always confirm the actual current branch (`git branch --show-current`) before assuming file state — don't assume a doc or module is missing just because it isn't in the branch expected; check `git log --oneline` for merge history first.
+ - **Change delivery workflow:** discuss approach in chat → Moeid picks → Claude builds+tests in sandbox → Claude generates a `.patch` via `git diff --cached`, verifies clean apply on a fresh tree → Claude presents the `.patch` → Moeid applies with `git apply`. **Caveat learned the hard way (see Issue #3): this doesn't always work cleanly for edits to existing files** — prefer it for **new files** (low risk, no context-matching needed), fall back to direct instructions/manual edits for small single-line changes to existing files if a patch fails. **For `docs/CLAUDE.md` and `docs/PROJECT_ROADMAP.md` specifically: these are supplied to Claude directly via memory/project context already up to date - Claude must edit that known content directly and hand back the full file, never attempt to fetch or re-derive them from GitHub or assume a different repo layout (see Issue #4).**
+ 
+@@ -237,6 +276,22 @@ Downloader Bot/
+ - **Resolution:** Claude edited the actual known `docs/` content directly and handed back the complete updated files, with no GitHub lookups, no sandbox repo reconstruction for these two files, and no patch generation against a guessed path.
+ - **Lesson / new working rule:** when Claude already has current file content via memory or project context, **use that content directly** - treat it as more reliable than anything Claude would otherwise guess, fetch, or reconstruct. Never re-derive a file's repo path or content from GitHub, a sandbox rebuild, or general assumptions about "typical" project layout when the real content is already sitting in context. If there's genuine doubt about whether memory is current, ask Moeid directly ("is this still accurate?") rather than going and fetching it a different way that risks reintroducing exactly this kind of mismatch.
+ 
++### Issue #5 — YouTube anonymous extraction rejected by every configured client, root cause still unconfirmed (open, ongoing)
++- **Symptom:** during manual real-Telegram testing of the YouTube quality-selection flow (Step 7), `get_available_qualities()` raised `YouTubeExtractionError`. yt-dlp logged an identical `"Sign in to confirm you're not a bot"` rejection for all four configured anonymous clients (default, `android`, `ios`, `tv`) in `downloader/youtube.py`'s fallback chain. **As of this writing, this has now happened on every single real attempt: 5 different real videos, tested from 2 different countries (Moeid's own connection, and a friend's in Turkey) — zero successful downloads so far.**
++- **What's been ruled out:**
++  - **Not a single-video quirk.** A throwaway manual diagnostic script (`manual_test_youtube_fallback.py`) confirmed the identical total rejection on a second, independent real video, ruling out "this one video is flagged" as the explanation.
++  - **Not a stale yt-dlp pin.** `yt-dlp==2026.8.19` (the pinned version) was confirmed to already be the latest release on PyPI at the time of checking — upgrading alone would not have helped.
++  - **Not a missing JS runtime.** yt-dlp `2025.11.12+` requires an external JavaScript runtime (Deno recommended) to solve YouTube's JS challenge, and its absence produces a very similar-looking failure mode. Deno was installed and verified active (`yt-dlp -v` showed `JS runtimes: deno-2.9.7` and the "no JS runtime" warning gone) — **the exact same bot-check rejection still occurred, unchanged.** This ruled out the missing-JS-runtime theory as the cause of this specific failure, though installing Deno was still worth doing regardless (see §7).
++- **What's suspected but NOT confirmed either way:**
++  - **VPN/IP reputation.** Moeid's traffic (and his friend's, separately, in a different country) both route through proxy/VPN setups for censorship-circumvention reasons (see §7). The assisting model's working theory is that YouTube's abuse-detection may be scoring the exit IP(s) poorly, independent of client identity, video, or JS-runtime presence — this would explain the 100% failure rate across every variable tested so far. **Moeid has explicitly pushed back on this theory** ("I don't think it's VPN- or IP-related. It's more likely related to the method we're using") and considers it more likely something about the extraction *method* itself. **Neither theory has been tested directly** — the diagnostic that would actually distinguish them (running with the proxy/VPN fully disabled) has not been run, and may not be practical given Moeid's proxy is a functional necessity, not an optional toggle, for his network.
++- **Current status: unresolved, open, tracked as a standalone parallel work item (Track B — see §2 and `AI_COLLABORATION.md`).** The extraction fallback loop itself is confirmed working correctly every time (tries each configured client once, in order, no wasted retries, wraps the failure cleanly into `YouTubeExtractionError`, produces a translated user-facing message with no raw yt-dlp text leaked to Telegram) — **this is not a bug in `downloader/youtube.py`'s logic**, it's that YouTube is rejecting every anonymous request this environment has sent it so far, for a reason not yet pinned down.
++- **Constraints for whoever picks this up next (any model):**
++  - Phase 1 remains anonymous-only by design (Phase 0 decision, §3) — **cookies, PO tokens, session auth, or browser-like auth workarounds are explicitly out of scope for this phase** and must not be introduced in response to this issue, no matter how tempting a quick fix they might seem. This is Moeid's explicit, repeated decision, not an oversight to "helpfully" work around.
++  - Scope is confined to `downloader/youtube.py`. Do not touch `bot/handlers.py`, `bot/keyboards.py`, or the pending-selection logic to chase this — none of that layer is implicated, and touching it risks colliding with Track A's delivery-pipeline work happening in parallel.
++  - Before proposing a new theory or fix, re-read this entire entry — the JS-runtime and stale-version theories looked equally plausible before being tested and ruled out; don't re-propose either without new evidence.
++  - A next reasonable diagnostic (not yet done): test with the proxy/VPN fully disabled, if Moeid is able to do so even briefly, to actually distinguish the two remaining live theories instead of leaving them both unconfirmed indefinitely.
++  - See `MODULES.md`'s "Open backlog" note for the previously-proposed (not-yet-built) idea of making the fallback client list configurable — that remains a *mitigation* to consider only once the actual root cause is understood, not a fix to reach for blindly now.
++
+ ---
+ 
+ ## 9. Working relationship / process notes
+@@ -248,6 +303,7 @@ Downloader Bot/
+ - When something doesn't work, he'll paste raw terminal output/tracebacks — read them carefully for the *actual* failing line before proposing fixes (e.g. Issue #2 required reading the PTB traceback down to the literal `asyncio.get_event_loop()` line, not just pattern-matching on the visible `RuntimeError` text).
+ - He's willing to do manual/hand edits when patches misbehave rather than insisting on patch purity — don't over-invest in fixing a fragile patch when a two-line manual instruction solves it just as well.
+ - **He maintains `docs/CLAUDE.md` and `docs/PROJECT_ROADMAP.md` explicitly so Claude always has current project memory without needing to fetch anything** - he is (understandably) frustrated when Claude ignores that and goes to GitHub or reconstructs assumed file layouts instead, since it wastes his time and tokens for no benefit. Default to trusting and editing the content already in context; only go looking elsewhere if Moeid says the context is stale.
++- **Moeid now works with multiple AI models in parallel** (he has subscriptions/access to several) and deliberately splits independent work across them rather than serializing everything through one model — see `AI_COLLABORATION.md` for the full framework and `MODULES.md` for the concrete module boundaries this depends on. If you are a model picking up one of the parallel tracks, read both of those files in full before starting, and update this file's relevant sections (§2, §5, §8, §10 as applicable) before considering your piece of work "handed off" — a stale `CLAUDE.md` actively misleads whichever model or session picks up next, which is worse than an honestly incomplete one.
+ 
+ ---
+ 
+@@ -258,14 +314,17 @@ Downloader Bot/
+ - ~~Consider whether `PROJECT_ROADMAP.md`'s Phase 0 decisions table should get a note about the `python-telegram-bot` version bump, per Rule 8 (documentation currency).~~ ✅ Done — added to both `PROJECT_ROADMAP.md` and `docs/PROJECT_ROADMAP.md` (Sept 4, 2026).
+ - ~~No fallback/unrecognized-message handler exists yet~~ — **resolved in Step 5**: `handle_url_message` now replies to any plain text message (URL or not), so this is no longer an open item.
+ - Instagram picture posts and carousels are not yet supported by `download_instagram_video()` (video-only for now, per Moeid) — explicitly deferred, not a bug.
+-- Once YouTube downloading exists, the "Delivery" work (video_service.py, file_service.py, wiring both downloaders into bot/handlers.py, sending files via Telegram, cleanup) becomes the next real milestone - don't start it before YouTube downloading is done, per Rule 7 (both platforms share this pipeline).
++- ~~Once YouTube downloading exists, the "Delivery" work... becomes the next real milestone - don't start it before YouTube downloading is done, per Rule 7 (both platforms share this pipeline).~~ **Superseded.** Moeid explicitly decided to run Instagram delivery (Track A) and the YouTube extraction fix (Issue #5, Track B) in parallel instead, given Issue #5 is an open-ended external blocker with no known timeline — see §2 and `AI_COLLABORATION.md`. `services/video_service.py`/`services/file_service.py` will initially be built and wired against Instagram only; YouTube gets connected to the same pipeline once Issue #5 is resolved, ideally without needing to duplicate the delivery-layer work (worth designing the pipeline with that in mind, but not over-engineering a generic abstraction for a second platform that isn't ready yet — Rule 3).
++- **`python-dotenv could not parse statement starting at line 14`** — this warning has appeared in every single terminal log Moeid has pasted since Step 7 testing began, and is still unresolved. Low priority (the bot starts and runs fine despite it), but worth actually fixing at some point rather than continuing to ignore it. Moeid has declined to paste raw `.env` content (reasonably, since it may contain secrets) and instead offered to run a redacted check (`Get-Content .env | Select-Object -Index 13` piped through a small snippet that only reveals the variable name, not its value) — that redacted output was never actually sent. Whoever picks this up next should re-ask for it specifically, or just ask Moeid to describe what's on that line in general terms (e.g. "is it blank, a comment, a multi-line value, something with unescaped quotes?").
++- Possible future operational task: make `_FALLBACK_CLIENTS` in `downloader/youtube.py` configurable (e.g. via `.env`/`Settings`) so a different anonymous client combination can be tried for diagnostics without a code change. Would be an operational mitigation only, not a permanent fix - YouTube's client-blocking behavior changes frequently. **Explicitly not to be built as a reflexive response to Issue #5** — only worth doing once the actual root cause (method vs. network) is better understood, since blindly expanding the client list won't help if the real cause turns out to be network-level. Not started, not scheduled. See Issue #5.
+ 
+ ---
+ 
+ ## 11. Quick-reference: how to pick up work in a new session
+ 
+ 1. Read this file fully before touching code - this file (and `PROJECT_ROADMAP.md`) are supplied via memory/project context and should be treated as current; don't re-fetch them from GitHub unless Moeid says this content is stale.
+-2. Check `PROJECT_ROADMAP.md` §16 ("Current Development Position") to confirm phase.
+-3. If something about file state is genuinely unclear (e.g. "does this file exist"), ask Moeid directly rather than guessing at repo layout or going to GitHub - see Issue #4.
+-4. Follow the standard workflow: discuss → Moeid picks → build+test in sandbox → patch (new files) or direct instructions (small edits to existing files) → Moeid applies and manually verifies.
+-5. Update this file after material progress — new step completed, new decision made, new issue hit and resolved.
++2. **Read `AI_COLLABORATION.md` and `MODULES.md` too, in full, before starting anything** — this project now has more than one AI model working on it in parallel across separate tracks (see §2). Reading only this file is not enough to know what's safe to touch; the module map determines that.
++3. Check `PROJECT_ROADMAP.md` §16 ("Current Development Position") to confirm phase.
++4. If something about file state is genuinely unclear (e.g. "does this file exist"), ask Moeid directly rather than guessing at repo layout or going to GitHub - see Issue #4.
++5. Follow the standard workflow: discuss → Moeid picks → build+test in sandbox → patch (new files) or direct instructions (small edits to existing files) → Moeid applies and manually verifies.
++6. Update this file after material progress — new step completed, new decision made, new issue hit and resolved. If you're one of several models working in parallel, this update **is** your handoff — see `AI_COLLABORATION.md` for what a complete handoff needs to include.
+diff --git a/PROJECT_ROADMAP.md b/PROJECT_ROADMAP.md
+index 1eafd38..35b93a7 100644
+--- a/PROJECT_ROADMAP.md
++++ b/PROJECT_ROADMAP.md
+@@ -153,6 +153,7 @@ These decisions were made during Phase 0 planning and constrain Phase 1 implemen
+ | Instagram authentication | Phase 1 uses anonymous `yt-dlp` extraction only. The architecture must leave room for optional cookie/session-based authentication in a later phase. Any future credentials must be handled as configuration/secrets (e.g., via `.env`), never hardcoded or surfaced in user-facing Telegram messages. |
+ | Logging | Python's stdlib `logging` module. Phase 1 implements basic logging; Phase 2 expands it into the structured/diagnostic logging described in that phase. |
+ | YouTube single-quality videos | If a specific YouTube video only exposes one downloadable quality, the bot auto-downloads it rather than presenting a one-item menu, and explicitly tells the user that only one quality was available. This is a UX exception, not a change to the underlying policy: YouTube quality is still always *inspected* per video; the user is only skipped the selection step when there is nothing to select. |
++| YouTube JS-runtime dependency | Not anticipated in Phase 0 planning. As of yt-dlp `2025.11.12+`, an external JavaScript runtime (Deno recommended) is required for full YouTube extraction support. Installed (`deno 2.9.7`) and verified active on Moeid's machine during the Step 7 real-world troubleshooting described in `CLAUDE.md` Issue #5. **Confirmed not sufficient on its own** to resolve the anonymous-extraction bot-check rejection also documented there — a real prerequisite regardless, but not the fix for that separate, still-open issue. |
+ 
+ ## Expected result
+ 
+@@ -242,22 +243,22 @@ Project-specific concepts:
+ 
+ ### Bot foundation
+ 
+-- [ ] Start the Telegram bot.
+-- [ ] Implement `/start`.
+-- [ ] Implement basic user interaction.
+-- [ ] Create the initial main menu.
+-- [ ] Validate that FFmpeg is installed and available on `PATH` at startup; fail fast with a clear error if it is not.
++- [✅] Start the Telegram bot.
++- [✅] Implement `/start`.
++- [✅] Implement basic user interaction.
++- [✅] Create the initial main menu.
++- [✅] Validate that FFmpeg is installed and available on `PATH` at startup; fail fast with a clear error if it is not.
+ 
+ ### Language
+ 
+-- [ ] Detect first-time users.
+-- [ ] Show Persian/English selection.
+-- [ ] Save the selected language (SQLite, accessed only through `language_service.py`).
+-- [ ] Load the saved language for returning users.
+-- [ ] Add language switching.
+-- [ ] Centralize translated strings behind a lookup by message key + language code.
+-- [ ] Localize status messages.
+-- [ ] Localize errors.
++- [✅] Detect first-time users.
++- [✅] Show Persian/English selection.
++- [✅] Save the selected language (SQLite, accessed only through `language_service.py`).
++- [✅] Load the saved language for returning users.
++- [✅] Add language switching.
++- [✅] Centralize translated strings behind a lookup by message key + language code.
++- [✅] Localize status messages.
++- [✅] Localize errors.
+ 
+ ### URL handling
+ 
+@@ -273,15 +274,19 @@ Project-specific concepts:
+ - [✅] Avoid intentionally reducing quality.
+ - [✅] Handle required FFmpeg processing.
+ 
++> ⚠️ **Downloader implemented and verified standalone; not yet wired into `bot/handlers.py`.** A real Instagram URL sent to the bot today still gets the Step 5 placeholder reply, not a video. Wiring this in — sending the file through Telegram, cleanup — is Track A's current work. See `CLAUDE.md` §2.
++
+ ### YouTube
+ 
+-- [ ] Extract available formats.
+-- [ ] Determine available video qualities.
+-- [ ] Display actual available qualities.
+-- [ ] Allow the user to select one.
+-- [ ] If only one quality is available, skip the menu, auto-download it, and inform the user only one quality existed.
+-- [ ] Download the selected quality.
+-- [ ] Merge audio/video when necessary.
++- [✅] Extract available formats.
++- [✅] Determine available video qualities.
++- [✅] Display actual available qualities.
++- [✅] Allow the user to select one.
++- [✅] If only one quality is available, skip the menu, auto-download it, and inform the user only one quality existed.
++- [✅] Download the selected quality.
++- [✅] Merge audio/video when necessary.
++
++> ⚠️ **Implementation, UI, and wiring are complete and manually verified end-to-end for every path except a successful real download.** Every real download attempt so far (5 real videos, 2 countries) has failed during extraction with YouTube's anonymous "Sign in to confirm you're not a bot" rejection — this is an active, unresolved, external blocker (`CLAUDE.md` Issue #5), not an implementation gap. The checkboxes above reflect that the code exists, is tested, and behaves correctly whenever extraction itself succeeds; they do not claim a real download has been observed to complete.
+ 
+ ### Delivery
+ 
+@@ -1387,6 +1392,8 @@ The immediate target is:
+ 
+ The next implementation work should therefore remain focused on this vertical slice.
+ 
++**Current status (as of the Step 7 / multi-model split):** Language, config, and URL handling are done and verified. Both downloaders (Instagram, YouTube) are implemented and unit-tested; the YouTube quality-selection UI is fully wired and verified end-to-end except for a successful real download, which is currently blocked by an unresolved external YouTube anonymous-extraction issue. Work is now split into two independent parallel tracks — the Instagram delivery pipeline, and the YouTube extraction blocker — run by separate AI model sessions. See `CLAUDE.md` §2 for the live status table, `CLAUDE.md` Issue #5 for the YouTube blocker's full investigation trail, and `AI_COLLABORATION.md` / `MODULES.md` for how the parallel work is coordinated and how a new session (human or AI) should pick up either track without re-deriving context from scratch.
++
+ ---
+ 
+ # 17. Final Roadmap Philosophy
