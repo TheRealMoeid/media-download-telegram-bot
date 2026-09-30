@@ -99,5 +99,5 @@ dist/
 *.db
 
 *.png
-
+*.patch
 repo link.md
