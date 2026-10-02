@@ -246,7 +246,7 @@ Project-specific concepts:
 - [✅] Start the Telegram bot.
 - [✅] Implement `/start`.
 - [✅] Implement basic user interaction.
-- [✅] Create the initial main menu.
+- [✅] Create the initial main menu. (`/menu` — Main menu → Settings → Language; built Oct 2 2026, manually verified against real Telegram.)
 - [✅] Validate that FFmpeg is installed and available on `PATH` at startup; fail fast with a clear error if it is not.
 
 ### Language
@@ -255,7 +255,7 @@ Project-specific concepts:
 - [✅] Show Persian/English selection.
 - [✅] Save the selected language (SQLite, accessed only through `language_service.py`).
 - [✅] Load the saved language for returning users.
-- [✅] Add language switching.
+- [✅] Add language switching. (Via `/menu` → Settings → Language, reusing the existing picker and `set_lang:` handler; built Oct 2 2026. Earlier this box was ticked before the feature existed — it is now actually true.)
 - [✅] Centralize translated strings behind a lookup by message key + language code.
 - [✅] Localize status messages.
 - [✅] Localize errors.
@@ -1210,14 +1210,14 @@ The project should be considered **fully developed** when:
 
 ### Product
 
-- [ ] Users can select Persian or English.
-- [ ] Language preferences persist.
-- [ ] Users can change language.
-- [ ] Instagram videos download at the best available quality.
-- [ ] YouTube videos provide actual available quality choices.
-- [ ] Selected YouTube quality is downloaded.
-- [ ] FFmpeg processing works when required.
-- [ ] Videos are delivered through Telegram.
+- [✅] Users can select Persian or English.
+- [✅] Language preferences persist.
+- [✅] Users can change language.
+- [✅] Instagram videos download at the best available quality.
+- [✅] YouTube videos provide actual available quality choices.
+- [✅] Selected YouTube quality is downloaded.
+- [✅] FFmpeg processing works when required.
+- [✅] Videos are delivered through Telegram.
 
 ### Reliability
 
@@ -1328,11 +1328,11 @@ Then update the relevant documentation.
 
 # 16. Current Development Position
 
-The project is currently preparing for:
+**Phase 1 — MVP is complete as of Oct 2 2026.** The diagram below records the vertical slice that was built and verified; it is kept for reference.
 
-## **Phase 1 — MVP**
+## **Phase 1 — MVP (complete)**
 
-The immediate target is:
+The Phase 1 target was:
 
 ```text
                 ┌───────────────────┐
@@ -1390,9 +1390,9 @@ The immediate target is:
                        Cleanup
 ```
 
-The next implementation work should therefore remain focused on this vertical slice.
+The next implementation work moves to **Phase 2 — Reliability, Validation & User Experience**. Remaining Phase 1 leftovers are small cleanup items listed in `CLAUDE.md` §10 (e.g. an unused translation key), not missing requirements.
 
-**Current status (as of Oct 1 2026, Track A complete):** Language, config, URL handling, both downloaders, and the delivery pipeline are done and manually verified against real Telegram. Instagram and YouTube both download, send the video back, and clean up; YouTube quality buttons show estimated sizes. The YouTube extraction blocker (Issue #5) is resolved. The bot is being built for Moeid's personal use, so some public-bot concerns (size pre-checks, real concurrency) are intentionally deferred — see `CLAUDE.md` §2 "Track A decisions" and §10 for open items, including a check on whether language *switching* and the main menu actually exist. Only the opportunistic Track C (YouTube PO-token provider) remains from the multi-model split; see `MODULES.md` and `AI_COLLABORATION.md` for how it is coordinated.
+**Current status (as of Oct 2 2026, Phase 1 complete):** Language (including switching via `/menu` → Settings → Language), config, URL handling, both downloaders, and the delivery pipeline are done and manually verified against real Telegram. Instagram and YouTube both download, send the video back, and clean up; YouTube quality buttons show estimated sizes. The YouTube extraction blocker (Issue #5) is resolved. The bot is being built for Moeid's personal use, so some public-bot concerns (size pre-checks, real concurrency) are intentionally deferred — see `CLAUDE.md` §2 "Track A decisions" and §10 for open items. Only the opportunistic Track C (YouTube PO-token provider) remains from the multi-model split; see `MODULES.md` and `AI_COLLABORATION.md` for how it is coordinated.
 
 ---
 

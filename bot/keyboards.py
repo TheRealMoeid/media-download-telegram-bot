@@ -7,14 +7,22 @@ never validates or interprets a tap afterwards (that's bot/handlers.py).
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Optional, Sequence
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from downloader.youtube import QualityOption
+from services.translations import translate
 
 LANGUAGE_CALLBACK_PREFIX = "set_lang:"
 YOUTUBE_QUALITY_CALLBACK_PREFIX = "yt_quality:"
+MENU_CALLBACK_PREFIX = "menu:"
+
+# Actions carried after MENU_CALLBACK_PREFIX. Navigation only - they never
+# change stored state (language is saved by the existing set_lang: flow).
+MENU_ACTION_SETTINGS = "settings"
+MENU_ACTION_LANGUAGE = "language"
+MENU_ACTION_BACK = "back"
 
 _MB = 1024 * 1024
 
@@ -36,8 +44,15 @@ def _quality_button_text(option: QualityOption) -> str:
     return option.label
 
 
-def language_selection_keyboard() -> InlineKeyboardMarkup:
-    """Build the Persian / English language-selection inline keyboard."""
+def language_selection_keyboard(
+    back_label: Optional[str] = None,
+) -> InlineKeyboardMarkup:
+    """Build the Persian / English language-selection inline keyboard.
+
+    With no argument this is exactly the keyboard /start shows. When
+    `back_label` is given (the in-menu picker), a second row with a Back
+    button is added that returns to the Settings screen.
+    """
     buttons = [
         [
             InlineKeyboardButton(
@@ -50,7 +65,50 @@ def language_selection_keyboard() -> InlineKeyboardMarkup:
             ),
         ]
     ]
+    if back_label is not None:
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    back_label,
+                    callback_data=f"{MENU_CALLBACK_PREFIX}{MENU_ACTION_SETTINGS}",
+                )
+            ]
+        )
     return InlineKeyboardMarkup(buttons)
+
+
+def main_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
+    """Main menu: a single Settings button, labelled in `lang`."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    translate("menu.settings_button", lang),
+                    callback_data=f"{MENU_CALLBACK_PREFIX}{MENU_ACTION_SETTINGS}",
+                )
+            ]
+        ]
+    )
+
+
+def settings_keyboard(lang: str) -> InlineKeyboardMarkup:
+    """Settings screen: Language, then Back to the main menu."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    translate("menu.language_button", lang),
+                    callback_data=f"{MENU_CALLBACK_PREFIX}{MENU_ACTION_LANGUAGE}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    translate("menu.back_button", lang),
+                    callback_data=f"{MENU_CALLBACK_PREFIX}{MENU_ACTION_BACK}",
+                )
+            ],
+        ]
+    )
 
 
 def youtube_quality_keyboard(

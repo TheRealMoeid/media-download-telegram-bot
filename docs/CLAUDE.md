@@ -22,7 +22,7 @@ Full rationale and the complete 9-phase plan live in `PROJECT_ROADMAP.md` (repo 
 
 ## 2. Where we are right now
 
-**Current phase: Phase 1 — MVP.**
+**Current phase: Phase 1 — MVP — all Phase 1 requirements are now met (Oct 2 2026).** What remains is small cleanup (§10) and the documented known limitations; the next phase is Phase 2 (reliability, validation & UX).
 
 | Phase 1 area | Status |
 |---|---|
@@ -33,6 +33,7 @@ Full rationale and the complete 9-phase plan live in `PROJECT_ROADMAP.md` (repo 
 | Instagram downloading + delivery (Step 6 + Track A) | ✅ Downloader verified against a real reel (Sept 21 2026). **Now wired end-to-end** (Track A, Oct 1 2026): URL → download → `send_video` → cleanup, **manually verified against real Telegram**. |
 | YouTube downloading + quality menu + delivery (Step 7 + Track A) | ✅ Quality-selection UI, pending-selection handling, and (Issue #5 ✅ resolved Sept 27 2026 — exit-node IP reputation, no code change) real downloads all verified. **Now wired through the same delivery pipeline as Instagram** (Track A, Oct 1 2026), and quality buttons show **estimated file sizes**. Manually verified against real Telegram. |
 | Delivery + cleanup (`services/video_service.py`, `services/file_service.py`) | ✅ Done (Track A, Oct 1 2026) — `deliver_video(download_fn, send_fn)` with per-request temp dirs, `asyncio.to_thread`, guaranteed cleanup, optional `KEEP_DOWNLOADS`. Manually verified. |
+| Main menu + language switching (`/menu`) | ✅ Done (Oct 2 2026) — `/menu` → Settings → Language → existing picker; language can now be changed after the first choice. Full test suite green on Moeid's machine and **manually verified against real Telegram** (switched fa → en and back, `/start` and `/menu` respect the saved language). |
 
 **Work was split into independent, parallel tracks** (see `AI_COLLABORATION.md` and `MODULES.md` for the full coordination model). Track A and Track B are now closed; only Track C remains:
 
@@ -55,6 +56,14 @@ These tracks were deliberately chosen so they don't share files in common (see `
 - **`KEEP_DOWNLOADS`** (default off): keeps the request directory when the download succeeded — even if sending failed, so an oversized video is still available locally. A failed download is always cleaned up. Nothing ever deletes kept files automatically.
 
 **Note on the delivery wiring:** Instagram and YouTube both go through `deliver_video()`; `bot/handlers.py` supplies the platform-specific `download_fn` and a shared `_video_sender()`.
+
+**Menu decisions (Moeid, Oct 2 2026 — treat as settled, same status as §3):**
+
+- **Option B chosen:** a minimal main menu with a Settings → Language path (not just a bare `/language` command). This is what makes the roadmap's "main menu" and "language switching" checkboxes true.
+- **Entry point is a new `/menu` command.** `/start` is deliberately unchanged (two-message first-time flow, single "welcome back" for returning users). No menu is shown automatically after the first language choice — a small separate decision if ever wanted.
+- **Inline keyboard, not a reply keyboard.** A reply keyboard sends its button labels as plain text, which the catch-all URL handler would answer with "unsupported link".
+- **Navigation edits the same message in place** (no chat flooding). The language confirmation stays a **new message**, as decided earlier. Navigation never saves anything; saving goes through the existing `set_lang:` flow.
+- **Menu and picker render in the user's current language.** The in-menu language picker carries an extra Back row (→ Settings); the picker `/start` shows is unchanged.
 
 ---
 
@@ -93,8 +102,8 @@ These tracks were deliberately chosen so they don't share files in common (see `
 Downloader Bot/
 ├── bot/
 │   ├── __init__.py
-│   ├── handlers.py         # /start, language callback, URL handling (Instagram delivery + YouTube quality flow), _video_sender(), register_handlers()
-│   └── keyboards.py        # language_selection_keyboard(), youtube_quality_keyboard() (buttons show estimated sizes), format_size()
+│   ├── handlers.py         # /start, /menu, menu navigation, language callback, URL handling (Instagram delivery + YouTube quality flow), _video_sender(), register_handlers()
+│   └── keyboards.py        # language_selection_keyboard(back_label=None), main_menu_keyboard(), settings_keyboard(), youtube_quality_keyboard() (buttons show estimated sizes), format_size()
 ├── config/
 │   ├── __init__.py
 │   └── settings.py         # frozen Settings dataclass, Settings.from_env(), module singleton `settings`
@@ -106,16 +115,17 @@ Downloader Bot/
 ├── services/
 │   ├── __init__.py
 │   ├── language_service.py # get_language / has_saved_language / set_language — SQLite, only module touching it
-│   ├── translations.py     # TRANSLATIONS dict + translate(key, lang, **kwargs), incl. url.* and youtube.* keys
+│   ├── translations.py     # TRANSLATIONS dict + translate(key, lang, **kwargs), incl. url.*, youtube.* and menu.* keys
 │   ├── file_service.py     # create_request_dir() / cleanup() — per-request temp dirs, guarded delete (Track A, done)
 │   └── video_service.py    # deliver_video() + DeliveryOutcome — platform-agnostic download→send→cleanup (Track A, done)
 ├── tests/
 │   ├── __init__.py
 │   ├── test_settings.py            # 6 tests
 │   ├── test_language_service.py    # 8 tests
-│   ├── test_translations.py        # tests for translate(), incl. url.* and youtube.* keys, kwargs formatting — 24 tests
+│   ├── test_translations.py        # tests for translate(), incl. url.*, youtube.* and menu.* keys, kwargs formatting
 │   ├── test_handlers.py            # unit tests, service layer mocked — 4 tests
 │   ├── test_handlers_integration.py# real language_service + tmp SQLite DB, no mocks — 2 tests
+│   ├── test_menu.py                # menu keyboards, /menu, menu navigation, handler registration/prefix separation, 2 real-integration tests (change language via menu, per-user independence)
 │   ├── test_handlers_url.py        # handle_url_message() non-YouTube paths, detect_platform mocked — 3 tests
 │   ├── test_handlers_youtube.py    # YouTube quality-selection flow: menus, callbacks, token/expiry/double-tap — 13 tests
 │   ├── test_manager.py             # detect_platform(), pure unit tests — 25 tests
@@ -170,7 +180,8 @@ Downloader Bot/
 - Keys added in Step 5: `url.detected_youtube`, `url.detected_instagram`, `url.unsupported` — used by `handle_url_message` in `bot/handlers.py`.
 - Keys added in Step 7: `youtube.choose_quality`, `youtube.single_quality_auto`, `youtube.download_started`, `youtube.download_complete`, `youtube.selection_expired`, `youtube.extraction_failed`, `youtube.download_failed` — used by the YouTube quality-selection flow in `bot/handlers.py`. The `youtube.single_quality_auto`, `youtube.download_started`, and `youtube.download_complete` keys take the `quality` kwarg described above.
 - Keys added in Track A: `instagram.downloading`, `instagram.download_failed`, `delivery.send_failed` (shared — used by both platforms when the upload fails). **Removed:** `url.detected_instagram` (the Step 5 placeholder, obsolete once Instagram was wired). `url.detected_youtube` has been unused since Step 7 but was left in place — candidate for removal.
-- Dotted key names (`url.*`, `youtube.*`) are just a naming convention (grouping by feature), not a nested-lookup mechanism — `TRANSLATIONS` is still a flat single-level dict keyed by the full string.
+- Keys added with the menu feature (Oct 2 2026): `menu.title`, `menu.settings_button`, `menu.settings_title`, `menu.language_button`, `menu.back_button`. The language-picker prompt inside the menu reuses the existing `choose_language` key. The Persian wording was written by Claude (not yet reviewed by a native speaker).
+- Dotted key names (`url.*`, `youtube.*`, `menu.*`) are just a naming convention (grouping by feature), not a nested-lookup mechanism — `TRANSLATIONS` is still a flat single-level dict keyed by the full string.
 - `language_set` is **not parameterized** — it's just two fixed strings, one per language, each already saying "set to [that language]" in that language. This works because there are only two languages; if a third language were ever added this would need to become a template instead of two hardcoded full sentences.
 - Handlers must never hardcode user-facing strings — always go through `translate()`.
 
@@ -222,9 +233,11 @@ Downloader Bot/
 
 ### `bot/keyboards.py`
 - `LANGUAGE_CALLBACK_PREFIX = "set_lang:"` — callback_data is `f"{LANGUAGE_CALLBACK_PREFIX}{lang_code}"`, e.g. `"set_lang:fa"`.
-- `language_selection_keyboard()` returns an `InlineKeyboardMarkup` with one row: 🇮🇷 فارسی / 🇺🇸 English.
+- `language_selection_keyboard(back_label=None)` returns an `InlineKeyboardMarkup` with one row: 🇮🇷 فارسی / 🇺🇸 English. With no argument it is exactly what `/start` shows. When `back_label` is given (the in-menu picker), a second row with a Back button (`menu:settings`) is added.
 - `YOUTUBE_QUALITY_CALLBACK_PREFIX = "yt_quality:"` (Step 7) — callback_data is `f"{YOUTUBE_QUALITY_CALLBACK_PREFIX}{token}:{index}"`, e.g. `"yt_quality:AbC123xy:0"`. **Deliberately carries only a token and a list index — never the URL or a raw yt-dlp format id** — see `bot/handlers.py`'s pending-selection notes below for why.
 - `youtube_quality_keyboard(token, options)` (Step 7) — builds one button per row from the real `QualityOption` list `get_available_qualities()` returned for that specific video; never invents or assumes qualities. **Button text is `"1080p (~85 MB)"` when `filesize` is known, just `"1080p"` otherwise** (`format_size()` is a small public helper in this module). `callback_data` is unchanged by sizes. This function only builds the layout — it doesn't decide what qualities exist (that's `downloader/youtube.py`) and doesn't validate a tap afterwards (that's `bot/handlers.py`).
+- `MENU_CALLBACK_PREFIX = "menu:"` (menu feature) — callback_data is `menu:<action>` with `MENU_ACTION_SETTINGS = "settings"`, `MENU_ACTION_LANGUAGE = "language"`, `MENU_ACTION_BACK = "back"`. Navigation only; no state in the callback data.
+- `main_menu_keyboard(lang)` — a single ⚙️ Settings button (`menu:settings`). `settings_keyboard(lang)` — 🌐 Language (`menu:language`) and ⬅️ Back (`menu:back`). Labels come from `translate()`, so this module now imports `services.translations` (it previously only built layouts from data it was handed; labels for the menu are the exception).
 - **Callback prefixes must stay distinct.** Any future interactive feature needs its own callback-data prefix — `register_handlers()` matches callbacks by regex prefix, in registration order, so two features sharing a prefix (or one being a substring-match of another) would misroute taps. See `MODULES.md` for the full registered-prefix list before adding a new one.
 
 ### `bot/handlers.py`
@@ -236,6 +249,8 @@ Downloader Bot/
   - **Order matters:** calls `set_language(user_id, lang)` first, *then* sends the confirmation — confirmation must reflect the just-saved state, not stale state. This is asserted directly in `test_language_selection_saves_before_confirming`.
   - Confirmation is sent as a **new message** (not an edit of the keyboard message) — explicit decision from Moeid.
   - Confirmation text is always `translate("language_set", lang)` using the **newly selected** `lang`, never whatever was active before.
+- `menu(update, context)` (menu feature) — handles `/menu`: replies `translate("menu.title", lang)` with `main_menu_keyboard(lang)`, where `lang = get_language(user_id)` (English for a user with nothing saved).
+- `handle_menu_navigation(update, context)` (menu feature) — handles `menu:` callbacks: `settings` → Settings screen, `language` → `choose_language` text + picker with a Back row, `back` → main menu. Edits the tapped message in place via `query.edit_message_text`; unknown actions are ignored; a `telegram.error.BadRequest` (e.g. "message is not modified" on a repeated tap) is swallowed and logged at debug. **Never calls `set_language`** (asserted by a test) — choosing a language goes through `handle_language_selection`, unchanged.
 - `handle_url_message(update, context)` (Step 5, extended in Step 7):
   - Registered as a catch-all `MessageHandler(filters.TEXT & ~filters.COMMAND, ...)` — fires on any plain text message that isn't a slash command, so `/start` and other commands are unaffected.
   - Looks up the sender's saved language via `get_language(user_id)`, calls `detect_platform(update.message.text)`. **YouTube URLs → `_handle_youtube_url()`; Instagram URLs → `_handle_instagram_url()`;** anything else gets `url.unsupported`.
@@ -251,7 +266,7 @@ Downloader Bot/
   - `handle_youtube_quality_selection(update, context)` parses `token` and `index` out of `callback_query.data`, then: no pending entry at all (bot restarted, or nothing was ever pending) → expired message. Pending entry exists but its token doesn't match (superseded by a newer URL, or a stale button from an old menu) → expired message, **and the still-current pending selection is left untouched** — a stale tap must never clobber a legitimately pending one. Token matches → **the pending entry is deleted immediately, before the download starts** — this is what makes a double-tap on the same button safe: the second update (whether it arrives before or after the first download finishes) always finds nothing pending and gets the expired message instead of triggering a second download.
   - Out-of-range index (shouldn't happen from our own keyboard, but a malformed/tampered `callback_data` is still just an invalid selection, not a crash) → expired message, pending entry also cleared.
 - `_download_youtube_and_report(send, context, chat_id, url, option, lang, *, single_quality)` (Step 7, extended in Track A) — shared by the auto-download and user-selected paths. `send` posts text (`reply_text` on the message path, a `send_message` wrapper on the callback path); the video goes to `chat_id` via `_video_sender()` and `deliver_video(lambda d: download_youtube_video(url, option, d), ...)`. Sequence: announce → download+send+cleanup → `youtube.download_failed` / `delivery.send_failed` / `youtube.download_complete` (only on success, after the video).
-- `register_handlers(application)` — registers, in order: `CommandHandler("start", start)`, `CallbackQueryHandler(handle_language_selection, pattern="^set_lang:")`, `CallbackQueryHandler(handle_youtube_quality_selection, pattern="^yt_quality:")`, then `MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url_message)`. Order matters in `python-telegram-bot` — commands and callback buttons are matched before the catch-all text handler gets a chance to see the update. The two callback patterns are non-overlapping prefixes (`set_lang:` vs `yt_quality:`), confirmed not to cross-match.
+- `register_handlers(application)` — registers, in order: `CommandHandler("start", start)`, `CommandHandler("menu", menu)`, `CallbackQueryHandler(handle_language_selection, pattern="^set_lang:")`, `CallbackQueryHandler(handle_menu_navigation, pattern="^menu:")`, `CallbackQueryHandler(handle_youtube_quality_selection, pattern="^yt_quality:")`, then `MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url_message)`. Order matters in `python-telegram-bot` — commands and callback buttons are matched before the catch-all text handler gets a chance to see the update. The three callback patterns are non-overlapping prefixes (`set_lang:`, `menu:`, `yt_quality:`); `tests/test_menu.py` asserts each sample callback matches exactly one handler.
 
 ### `run.py`
 - `check_ffmpeg(ffmpeg_path)` — small, standalone, directly-testable function using `shutil.which()`. Raises `RuntimeError` with a clear message if not found. Deliberately **not** a separate `bot/startup.py` module — Moeid's explicit call: not worth a new module for one Phase 1 check.
@@ -268,7 +283,7 @@ Downloader Bot/
 - `MagicMock`/`AsyncMock` are used to fake python-telegram-bot's `Update`/`Context` objects rather than constructing real ones — keeps tests fast and decoupled from the library's actual object graphs.
 - Pure-function modules (no Telegram/SQLite involved) get straightforward `pytest.mark.parametrize` unit tests with no mocking at all — see `test_manager.py`, which is the simplest test file in the project by design (`detect_platform()` takes a string, returns an enum, nothing to fake).
 - yt-dlp-based downloader tests (`test_instagram.py`, `test_youtube.py`) fake the whole `yt_dlp.YoutubeDL` class - no real network calls, no real extraction. `test_youtube.py` extends this pattern with a FIFO-scripted sequence of outcomes per attempt, so a single test can express "first client attempt blocked, second succeeds" — needed once `downloader/youtube.py` gained its multi-attempt fallback chain (Step 7). Real-world correctness is checked separately via a throwaway manual script run once against a live URL, never as part of the pytest suite.
-- **Test count:** 114 passing at the end of Step 7. Track A (Oct 1 2026) added tests in `test_file_service.py`, `test_video_service.py`, `test_handlers_instagram.py`, `test_keyboards.py`, `test_youtube_size.py`, `test_settings.py` (KEEP_DOWNLOADS parsing) and rewrote `test_handlers_youtube.py` for the new delivery flow, plus `conftest.py`. **The exact new total was not recounted in this document** — run `pytest tests/ -v` (or `--collect-only -q`) for a fresh figure rather than trusting any hand-summed number. Delivery-flow tests run the **real** `deliver_video()` and `file_service` against `tmp_path`, faking only yt-dlp and `context.bot.send_video`.
+- **Test count:** 114 passing at the end of Step 7. Track A (Oct 1 2026) added tests in `test_file_service.py`, `test_video_service.py`, `test_handlers_instagram.py`, `test_keyboards.py`, `test_youtube_size.py`, `test_settings.py` (KEEP_DOWNLOADS parsing) and rewrote `test_handlers_youtube.py` for the new delivery flow, plus `conftest.py`. **The exact new total was not recounted in this document** — run `pytest tests/ -v` (or `--collect-only -q`) for a fresh figure rather than trusting any hand-summed number. Delivery-flow tests run the **real** `deliver_video()` and `file_service` against `tmp_path`, faking only yt-dlp and `context.bot.send_video`. **Oct 2 2026:** the menu feature added `tests/test_menu.py` and menu keys to `test_translations.py`; Moeid confirmed `pytest tests/ -v` fully green on his machine afterwards (the exact total is still not hand-summed here).
 
 ---
 
@@ -361,13 +376,13 @@ Downloader Bot/
 - ~~Once YouTube downloading exists, the "Delivery" work... becomes the next real milestone - don't start it before YouTube downloading is done, per Rule 7 (both platforms share this pipeline).~~ **Superseded.** Moeid explicitly decided to run Instagram delivery (Track A) and the YouTube extraction fix (Issue #5, Track B) in parallel instead, given Issue #5 is an open-ended external blocker with no known timeline — see §2 and `AI_COLLABORATION.md`. `services/video_service.py`/`services/file_service.py` will initially be built and wired against Instagram only; YouTube gets connected to the same pipeline once Issue #5 is resolved, ideally without needing to duplicate the delivery-layer work (worth designing the pipeline with that in mind, but not over-engineering a generic abstraction for a second platform that isn't ready yet — Rule 3).
 - ~~`python-dotenv could not parse statement starting at line 14`~~ — **resolved**, see Issue #6 (PowerShell wrapper lines in `.env`/`.env.example`).
 - Possible future operational task: make `_FALLBACK_CLIENTS` in `downloader/youtube.py` configurable (e.g. via `.env`/`Settings`) so a different anonymous client combination can be tried for diagnostics without a code change. Now that Issue #5 (§8) is resolved and confirmed network-level (exit-node IP reputation) rather than client/method-level, this would be a minor convenience at most, not something expected to matter much in practice — deprioritized accordingly. Not started, not scheduled.
-- **Language switching and main menu may be missing.** `PROJECT_ROADMAP.md` ticks "Add language switching" and "Create the initial main menu", but `register_handlers()` only registers `/start`, the language and quality callbacks, and the URL handler — there is no command or button to change language after the first choice. Noticed while inspecting for Track A; **not verified or changed**. Check before treating Phase 1's language requirements as complete.
+- ~~**Language switching and main menu may be missing.**~~ — **resolved Oct 2 2026.** Verified missing, then built: `/menu` → Settings → Language (see §2 "Menu decisions", §5). Manually verified against real Telegram.
 - **Files over Telegram's ~50 MB bot limit.** Currently fail at send time (`delivery.send_failed`); with `KEEP_DOWNLOADS=true` the file stays on disk. Options if it becomes annoying: run a local Bot API server (raises the limit to 2 GB — the real fix), or add a size warning/refusal on buttons whose estimate exceeds the limit. Neither is built.
 - **Concurrency.** PTB handles updates sequentially, so one long download delays every other message. Fine for personal use; real concurrency control is Phase 3.
 - **Kept downloads are never cleaned up** when `KEEP_DOWNLOADS=true`, and live in random `req_xxxx` folders named after the video ID inside. Friendlier naming or a flat folder would be a small separate change if wanted.
 - **Dead translation key** `url.detected_youtube` (unused since Step 7; its text is now false). Safe to remove together with its test entries.
-- **`docs/` mirror:** `docs/PROJECT_ROADMAP.md` needs re-copying from the root file after this update (root is canonical).
-- `README.md` and `media-download-telegram-bot-architecture.md` have stale status lines (README still says "Phase 0 — no implementation exists"; the architecture doc predates Track A). Not updated in this pass.
+- **`docs/` mirror:** `docs/PROJECT_ROADMAP.md` needs re-copying from the root file after the Oct 2 2026 update (root is canonical).
+- `media-download-telegram-bot-architecture.md` status line refreshed Oct 2 2026. `README.md` still needs the small `/menu` edits (status line, behavior table row, "Known limitations" language-switching bullet, roadmap open-items bullet) — provided separately, not applied by Claude.
 
 ---
 

@@ -100,6 +100,27 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "The video was downloaded, but I couldn't send it to you. It may be larger than Telegram's 50 MB limit for bots.",
         "fa": "ویدیو دانلود شد، اما ارسال آن ناموفق بود. ممکن است حجم آن از محدودیت ۵۰ مگابایتی تلگرام برای ربات‌ها بیشتر باشد.",
     },
+    # --- Main menu / settings / language switching (menu feature) ---
+    "menu.title": {
+        "en": "Main menu",
+        "fa": "منوی اصلی",
+    },
+    "menu.settings_button": {
+        "en": "\u2699\uFE0F Settings",
+        "fa": "\u2699\uFE0F تنظیمات",
+    },
+    "menu.settings_title": {
+        "en": "Settings",
+        "fa": "تنظیمات",
+    },
+    "menu.language_button": {
+        "en": "\U0001F310 Language",
+        "fa": "\U0001F310 زبان",
+    },
+    "menu.back_button": {
+        "en": "\u2B05\uFE0F Back",
+        "fa": "\u2B05\uFE0F بازگشت",
+    },
 }
 
 

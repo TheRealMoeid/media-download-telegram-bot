@@ -19,6 +19,11 @@ EXPECTED_KEYS = {
     "instagram.downloading",
     "instagram.download_failed",
     "delivery.send_failed",
+    "menu.title",
+    "menu.settings_button",
+    "menu.settings_title",
+    "menu.language_button",
+    "menu.back_button",
 }
 
 
@@ -76,6 +81,18 @@ def test_delivery_translation_keys_are_nonempty_in_both_languages():
         "instagram.downloading",
         "instagram.download_failed",
         "delivery.send_failed",
+    ):
+        assert translate(key, "en").strip()
+        assert translate(key, "fa").strip()
+
+
+def test_menu_translation_keys_are_nonempty_in_both_languages():
+    for key in (
+        "menu.title",
+        "menu.settings_button",
+        "menu.settings_title",
+        "menu.language_button",
+        "menu.back_button",
     ):
         assert translate(key, "en").strip()
         assert translate(key, "fa").strip()

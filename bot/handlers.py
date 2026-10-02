@@ -13,6 +13,7 @@ import secrets
 from typing import Awaitable, Callable
 
 from telegram import Update
+from telegram.error import BadRequest
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -24,8 +25,14 @@ from telegram.ext import (
 
 from bot.keyboards import (
     LANGUAGE_CALLBACK_PREFIX,
+    MENU_ACTION_BACK,
+    MENU_ACTION_LANGUAGE,
+    MENU_ACTION_SETTINGS,
+    MENU_CALLBACK_PREFIX,
     YOUTUBE_QUALITY_CALLBACK_PREFIX,
     language_selection_keyboard,
+    main_menu_keyboard,
+    settings_keyboard,
     youtube_quality_keyboard,
 )
 from downloader.instagram import download_instagram_video
@@ -80,6 +87,58 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         translate("choose_language", _DEFAULT_LANGUAGE),
         reply_markup=language_selection_keyboard(),
     )
+
+
+async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /menu: show the main menu in the user's saved language.
+
+    Users with no saved language yet see it in English (get_language()'s
+    default), same as everything else before a choice exists.
+    """
+    lang = get_language(update.effective_user.id)
+    await update.message.reply_text(
+        translate("menu.title", lang), reply_markup=main_menu_keyboard(lang)
+    )
+
+
+async def handle_menu_navigation(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle taps on the menu: Main menu -> Settings -> Language picker.
+
+    Navigation only: the screen is swapped by editing the same message
+    in place, and nothing is saved here. Choosing a language in the
+    picker goes through the existing set_lang: flow
+    (handle_language_selection), so saving and the confirmation message
+    are unchanged. Unknown actions (stale or tampered callback_data) are
+    ignored.
+    """
+    query = update.callback_query
+    await query.answer()
+
+    lang = get_language(query.from_user.id)
+    action = query.data.removeprefix(MENU_CALLBACK_PREFIX)
+
+    if action == MENU_ACTION_SETTINGS:
+        text = translate("menu.settings_title", lang)
+        markup = settings_keyboard(lang)
+    elif action == MENU_ACTION_LANGUAGE:
+        text = translate("choose_language", lang)
+        markup = language_selection_keyboard(
+            back_label=translate("menu.back_button", lang)
+        )
+    elif action == MENU_ACTION_BACK:
+        text = translate("menu.title", lang)
+        markup = main_menu_keyboard(lang)
+    else:
+        return
+
+    try:
+        await query.edit_message_text(text, reply_markup=markup)
+    except BadRequest:
+        # e.g. "message is not modified" when the same button is tapped
+        # twice - harmless, nothing to tell the user.
+        logger.debug("Menu edit ignored", exc_info=True)
 
 
 async def handle_language_selection(
@@ -342,9 +401,15 @@ async def _download_youtube_and_report(
 def register_handlers(application: Application) -> None:
     """Register all handlers defined in this module on `application`."""
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("menu", menu))
     application.add_handler(
         CallbackQueryHandler(
             handle_language_selection, pattern=f"^{LANGUAGE_CALLBACK_PREFIX}"
+        )
+    )
+    application.add_handler(
+        CallbackQueryHandler(
+            handle_menu_navigation, pattern=f"^{MENU_CALLBACK_PREFIX}"
         )
     )
     application.add_handler(

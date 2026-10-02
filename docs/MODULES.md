@@ -15,7 +15,7 @@
 | 3 | Platform Detection | ✅ Done, stable |
 | 4 | YouTube Downloader | ✅ Implemented, tested, and **verified via real successful downloads** — Issue #5 resolved Sept 27 2026 (root cause: VLESS exit-node IP reputation, not this module's code) |
 | 5 | Instagram Downloader | ✅ Implemented, tested, verified, and **wired** (Track A, Oct 1 2026) |
-| 6 | Telegram Bot Layer | ✅ Implemented — now includes Instagram + YouTube delivery wiring |
+| 6 | Telegram Bot Layer | ✅ Implemented — includes Instagram + YouTube delivery wiring and the `/menu` main menu / language switching (Oct 2 2026) |
 | 7 | Delivery / Service Layer | ✅ Done (Track A, Oct 1 2026) — verified against real Telegram for both platforms |
 
 ---
@@ -108,7 +108,7 @@
 
 ## 6. Telegram Bot Layer
 
-**Responsibilities / scope:** All Telegram-facing interaction: `/start`, language selection, URL message routing, the full YouTube quality-selection UI and its pending-selection state machine. This is the **integration layer** — it's the one module that legitimately depends on almost every other module, which also makes it the highest-collision-risk module in the project.
+**Responsibilities / scope:** All Telegram-facing interaction: `/start`, `/menu` (main menu → Settings → Language), language selection, URL message routing, the full YouTube quality-selection UI and its pending-selection state machine. This is the **integration layer** — it's the one module that legitimately depends on almost every other module, which also makes it the highest-collision-risk module in the project.
 
 **Files:** `bot/handlers.py`, `bot/keyboards.py`
 
@@ -117,7 +117,7 @@
 **What can be developed independently:** Only loosely — because this module integrates so much, changes here are the most likely to collide with parallel work elsewhere. New features should extend existing patterns (new translation keys, a new callback prefix, a new pending-state key) rather than restructure what's already working.
 
 **What must be shared with other models:**
-- **The full set of registered callback-data prefixes**: `set_lang:` (language selection), `yt_quality:` (YouTube quality selection). Any new interactive feature needs its own distinct prefix — `register_handlers()` matches by regex prefix, so a collision or accidental substring match would misroute taps.
+- **The full set of registered callback-data prefixes**: `set_lang:` (language selection), `menu:` (main menu / Settings / language-picker navigation — navigation only, saves nothing; actions `settings`, `language`, `back`), `yt_quality:` (YouTube quality selection). Any new interactive feature needs its own distinct prefix — `register_handlers()` matches by regex prefix, so a collision or accidental substring match would misroute taps.
 - **The `context.user_data` key namespace**: currently just `_PENDING_YOUTUBE_KEY = "pending_youtube_selection"`. Any future feature needing its own pending state (e.g., an eventual Instagram confirmation step, or a "send vs. don't send" choice) needs its own distinct key — reusing this one would silently corrupt the YouTube flow's state.
 - The pending-selection design itself (token generation, consume-before-download, stale/double-tap handling) — see `CLAUDE.md` §5's `bot/handlers.py` notes for the full rationale before modifying any of it.
 
@@ -159,6 +159,7 @@ These files are touched by more than one module's boundary, or are the kind of s
 ## Currently active work (update this section as tracks change)
 
 - **Track A — Delivery pipeline — ✅ complete Oct 1 2026.** Built module 7 (`file_service`, `video_service`), wired Instagram and YouTube through it in module 6, added `KEEP_DOWNLOADS`, and added `QualityOption.filesize` (module 4, with Moeid's sign-off) for estimated sizes on the quality buttons. Decisions and rationale: `CLAUDE.md` §2 "Track A decisions".
+- **Menu / language switching — ✅ complete Oct 2 2026** (not a parallel track). Touched module 6 (`bot/handlers.py`, `bot/keyboards.py`) and module 2 (`services/translations.py`, five `menu.*` keys). No change to any downloader or to modules 1, 3, 4, 5, 7. Decisions: `CLAUDE.md` §2 "Menu decisions".
 - **Track B — YouTube extraction fix (Issue #5) — ✅ closed Sept 27 2026.** Was: module 4 only. Root cause found to be VLESS exit-node IP reputation, not this module's code; no changes were made to `downloader/youtube.py`. Full trail in `CLAUDE.md` §8.
 - **Track C — YouTube PO-token provider (`bgutil-ytdlp-pot-provider`), opportunistic — added Sept 27 2026, not started.** Owns: module 4 only, on its own branch, worked on whenever Moeid has time rather than on any deadline. Does not touch: module 6, module 7, or any other module — same isolation rule Track B followed. **Purpose:** not a fix for Issue #5 (that's resolved, and the resolution actually argues against this being an IP-reputation fix — a real, logged-out browser on the flagged exit node produced a genuine token via the real BotGuard challenge and was still blocked, meaning the block was upstream of token validity). Its real value is narrower: it can address two separate, smaller quirks observed during the Issue #5 investigation — the `ios` client's "GVS PO Token" requirement, and `android`'s reduced/SABR-limited format list — by supplying a real Proof-of-Origin token the same way a genuine browser does. **Still anonymous** — no login, no account, no cookies; this is not the cookie/session-auth option Phase 0 explicitly deferred, and should be described that way in any branch/PR to avoid confusion with that separate, still-out-of-scope decision.
   - **Note (Oct 1 2026):** `downloader/youtube.py` changed during Track A — `QualityOption` gained a `filesize` field and the size-estimation helpers were added. Track C should start from the current file, not an older copy.
@@ -167,7 +168,6 @@ These files are touched by more than one module's boundary, or are the kind of s
 
 ## Open backlog (not started, not currently assigned to either track)
 
-- Re-checking whether language *switching* and a main menu actually exist — `PROJECT_ROADMAP.md` ticks them but `bot/handlers.py` registers no command or button for changing language after the first choice. See `CLAUDE.md` §10.
 - Files over Telegram's ~50 MB bot limit: local Bot API server, or a size warning on buttons. See `CLAUDE.md` §10.
 - Phase 3 concurrency (non-blocking handlers) — PTB currently processes updates sequentially.
 
