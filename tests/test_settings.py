@@ -29,6 +29,7 @@ def test_from_env_uses_defaults_when_optional_vars_absent():
     assert settings.download_dir == "downloads/"
     assert settings.db_path == "bot.db"
     assert settings.ffmpeg_path == "ffmpeg"
+    assert settings.keep_downloads is False
 
 
 def test_from_env_uses_explicit_values_when_provided():
@@ -53,6 +54,20 @@ def test_from_env_strips_whitespace():
 
     assert settings.bot_token == "abc123"
     assert settings.download_dir == "downloads/"
+
+
+@pytest.mark.parametrize("value", ["true", "True", "TRUE", "1", "yes", "on", " true "])
+def test_keep_downloads_true_values(value):
+    settings = Settings.from_env(env={"BOT_TOKEN": "abc", "KEEP_DOWNLOADS": value})
+
+    assert settings.keep_downloads is True
+
+
+@pytest.mark.parametrize("value", ["false", "0", "no", "off", "", "banana"])
+def test_keep_downloads_false_values(value):
+    settings = Settings.from_env(env={"BOT_TOKEN": "abc", "KEEP_DOWNLOADS": value})
+
+    assert settings.keep_downloads is False
 
 
 def test_settings_instance_is_frozen():

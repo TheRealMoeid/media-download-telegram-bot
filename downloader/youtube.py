@@ -47,8 +47,8 @@ for a specific video, normalizes/deduplicates them into presentable
 quality options, and downloads one selected option to disk. It has no
 knowledge of Telegram, callback data, keyboards, or translations - that
 wiring lives in bot/handlers.py and bot/keyboards.py. It also does not
-send anything back through Telegram or clean up files - that is the
-separate "Delivery" work in PROJECT_ROADMAP.md, shared with Instagram.
+send anything back through Telegram or clean up files - that is
+services/video_service.py's job, shared with Instagram.
 """
 
 from __future__ import annotations
@@ -100,12 +100,18 @@ class QualityOption:
     should treat it as an opaque part of the option, never inspect or
     branch on it - its only job is letting download_youtube_video()
     reuse the exact same successful context that built the menu.
+
+    `filesize` is an *estimate*, in bytes, of the final downloaded file
+    (video stream plus, for video-only formats, the audio track that
+    will be merged in). None when YouTube didn't expose enough
+    information to estimate it. Display-only: nothing branches on it.
     """
 
     format_id: str
     label: str
     height: int
     client: Optional[str] = None
+    filesize: Optional[int] = None
 
 
 # Short, fixed, anonymous-only fallback chain for YouTube's "Sign in to
@@ -226,6 +232,43 @@ def _format_rank(fmt: dict) -> tuple:
     return (tbr, filesize)
 
 
+def _estimate_format_bytes(fmt: dict, duration: Optional[float]) -> Optional[int]:
+    """Best-effort size in bytes of a single format, or None if unknown.
+
+    Uses the exact `filesize` when YouTube exposes it, then yt-dlp's own
+    `filesize_approx`, and finally falls back to bitrate x duration
+    (tbr is in kbit/s). Anything else is unknown - never guessed.
+    """
+    size = fmt.get("filesize") or fmt.get("filesize_approx")
+    if size:
+        return int(size)
+    tbr = fmt.get("tbr")
+    if tbr and duration:
+        return int(tbr * 1000 / 8 * duration)
+    return None
+
+
+def _estimate_best_audio_bytes(
+    formats: list[dict], duration: Optional[float]
+) -> Optional[int]:
+    """Estimated size of the audio track a video-only download will merge.
+
+    Approximates yt-dlp's "bestaudio" as the audio-only format with the
+    highest audio bitrate. Returns None if there is no audio-only
+    format or its size can't be estimated.
+    """
+    audio_only = [
+        fmt
+        for fmt in formats
+        if fmt.get("acodec") not in (None, "none")
+        and fmt.get("vcodec") in (None, "none")
+    ]
+    if not audio_only:
+        return None
+    best = max(audio_only, key=lambda fmt: fmt.get("abr") or fmt.get("tbr") or 0)
+    return _estimate_format_bytes(best, duration)
+
+
 def get_available_qualities(url: str) -> list[QualityOption]:
     """Return the deduplicated, user-presentable qualities for `url`.
 
@@ -242,6 +285,9 @@ def get_available_qualities(url: str) -> list[QualityOption]:
     resolution, the highest-ranked one (see _format_rank) is kept, so
     the resulting menu never shows two buttons that look identical.
 
+    Each option also carries an estimated total file size (see
+    QualityOption.filesize), or None if it can't be estimated.
+
     Returns options sorted from highest to lowest resolution, each
     tagged with whichever client produced this result (see
     QualityOption.client) so a later download can reuse it exactly.
@@ -251,6 +297,7 @@ def get_available_qualities(url: str) -> list[QualityOption]:
     """
     info, client = _extract_info_with_fallback(url)
     formats = info.get("formats") or []
+    duration = info.get("duration")
 
     best_by_height: dict[int, dict] = {}
     for fmt in formats:
@@ -263,14 +310,25 @@ def get_available_qualities(url: str) -> list[QualityOption]:
         if current_best is None or _format_rank(fmt) > _format_rank(current_best):
             best_by_height[height] = fmt
 
+    audio_bytes = _estimate_best_audio_bytes(formats, duration)
+
     options = []
     for height, fmt in best_by_height.items():
         format_id = fmt["format_id"]
         needs_audio = fmt.get("acodec") in (None, "none")
         selector = f"{format_id}+bestaudio/best" if needs_audio else format_id
+
+        size = _estimate_format_bytes(fmt, duration)
+        if size is not None and needs_audio and audio_bytes:
+            size += audio_bytes
+
         options.append(
             QualityOption(
-                format_id=selector, label=f"{height}p", height=height, client=client
+                format_id=selector,
+                label=f"{height}p",
+                height=height,
+                client=client,
+                filesize=size,
             )
         )
 

@@ -153,7 +153,7 @@ These decisions were made during Phase 0 planning and constrain Phase 1 implemen
 | Instagram authentication | Phase 1 uses anonymous `yt-dlp` extraction only. The architecture must leave room for optional cookie/session-based authentication in a later phase. Any future credentials must be handled as configuration/secrets (e.g., via `.env`), never hardcoded or surfaced in user-facing Telegram messages. |
 | Logging | Python's stdlib `logging` module. Phase 1 implements basic logging; Phase 2 expands it into the structured/diagnostic logging described in that phase. |
 | YouTube single-quality videos | If a specific YouTube video only exposes one downloadable quality, the bot auto-downloads it rather than presenting a one-item menu, and explicitly tells the user that only one quality was available. This is a UX exception, not a change to the underlying policy: YouTube quality is still always *inspected* per video; the user is only skipped the selection step when there is nothing to select. |
-| YouTube JS-runtime dependency | Not anticipated in Phase 0 planning. As of yt-dlp `2025.11.12+`, an external JavaScript runtime (Deno recommended) is required for full YouTube extraction support. Installed (`deno 2.9.7`) and verified active on Moeid's machine during the Step 7 real-world troubleshooting described in `CLAUDE.md` Issue #5. **Confirmed not sufficient on its own** to resolve the anonymous-extraction bot-check rejection also documented there — a real prerequisite regardless, but not the fix for that separate issue (which was later resolved; see `CLAUDE.md` Issue #5). |
+| YouTube JS-runtime dependency | Not anticipated in Phase 0 planning. As of yt-dlp `2025.11.12+`, an external JavaScript runtime (Deno recommended) is required for full YouTube extraction support. Installed (`deno 2.9.7`) and verified active on Moeid's machine. It was a genuine prerequisite but was **not** the cause of the anonymous-extraction bot-check rejection investigated in `CLAUDE.md` Issue #5, which was later resolved (Sept 27 2026) and traced to the VPN exit node's IP reputation. |
 
 ## Expected result
 
@@ -274,7 +274,7 @@ Project-specific concepts:
 - [✅] Avoid intentionally reducing quality.
 - [✅] Handle required FFmpeg processing.
 
-> ⚠️ **Downloader implemented and verified standalone; not yet wired into `bot/handlers.py`.** A real Instagram URL sent to the bot today still gets the Step 5 placeholder reply, not a video. Wiring this in — sending the file through Telegram, cleanup — is Track A's current work. See `CLAUDE.md` §2.
+> ✅ **Wired end-to-end (Track A, Oct 1 2026):** an Instagram URL sent to the bot is now downloaded, sent back as a streamable video, and cleaned up — manually verified against real Telegram. See `CLAUDE.md` §2.
 
 ### YouTube
 
@@ -286,13 +286,13 @@ Project-specific concepts:
 - [✅] Download the selected quality.
 - [✅] Merge audio/video when necessary.
 
-> ✅ **Implementation, UI, wiring, and a real successful download are all now confirmed.** Earlier revisions of this document noted that every real download attempt had failed during extraction with YouTube's anonymous "Sign in to confirm you're not a bot" rejection (`CLAUDE.md` Issue #5). That issue is now **resolved** (Sept 27 2026): the root cause was the VLESS proxy's exit-node IP reputation with YouTube, not the extraction code or client list. Switching the exit node cleared the rejection immediately, confirmed by a real logged-out browser test and then by four successful real downloads across three videos, including a full FFmpeg merge. No changes were needed in `downloader/youtube.py` itself. Full investigation trail in `CLAUDE.md` Issue #5.
+> ✅ **Verified end-to-end (Oct 1 2026).** The earlier extraction blocker (`CLAUDE.md` Issue #5) turned out to be VLESS exit-node IP reputation, not an implementation gap, and was resolved Sept 27 2026 with no code change. YouTube is now wired through the same delivery pipeline as Instagram, and each quality button shows an estimated file size. Known limitation: videos over Telegram's ~50 MB bot-upload limit fail at send time (reported to the user; kept on disk if `KEEP_DOWNLOADS=true`).
 
 ### Delivery
 
-- [ ] Send the downloaded video to the user.
-- [ ] Delete temporary files.
-- [ ] Handle failures without crashing the bot.
+- [✅] Send the downloaded video to the user.
+- [✅] Delete temporary files. (Per-request directories, always cleaned up; optional `KEEP_DOWNLOADS=true` keeps them instead.)
+- [✅] Handle failures without crashing the bot. (Download and send failures are reported as translated messages via `DeliveryOutcome`; nothing is raised into the handler.)
 
 ## Expected result
 
@@ -1392,7 +1392,7 @@ The immediate target is:
 
 The next implementation work should therefore remain focused on this vertical slice.
 
-**Current status (as of Sept 27 2026):** Language, config, and URL handling are done and verified. Both downloaders (Instagram, YouTube) are implemented and unit-tested; the YouTube quality-selection UI is fully wired and now verified end-to-end **including successful real downloads** — the anonymous-extraction blocker (`CLAUDE.md` Issue #5) that had been open since Step 7 is resolved, with root cause traced to VLESS exit-node IP reputation rather than the extraction code itself. Track B (the YouTube extraction fix) is closed; Track A (the Instagram delivery pipeline) remains the active work. See `CLAUDE.md` §2 for the live status table, `CLAUDE.md` Issue #5 for the full investigation and resolution trail, and `AI_COLLABORATION.md` / `MODULES.md` for how a new session (human or AI) should pick up remaining work without re-deriving context from scratch.
+**Current status (as of Oct 1 2026, Track A complete):** Language, config, URL handling, both downloaders, and the delivery pipeline are done and manually verified against real Telegram. Instagram and YouTube both download, send the video back, and clean up; YouTube quality buttons show estimated sizes. The YouTube extraction blocker (Issue #5) is resolved. The bot is being built for Moeid's personal use, so some public-bot concerns (size pre-checks, real concurrency) are intentionally deferred — see `CLAUDE.md` §2 "Track A decisions" and §10 for open items, including a check on whether language *switching* and the main menu actually exist. Only the opportunistic Track C (YouTube PO-token provider) remains from the multi-model split; see `MODULES.md` and `AI_COLLABORATION.md` for how it is coordinated.
 
 ---
 

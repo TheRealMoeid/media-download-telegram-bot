@@ -14,9 +14,9 @@
 | 2 | Language & Translations | ✅ Done, stable |
 | 3 | Platform Detection | ✅ Done, stable |
 | 4 | YouTube Downloader | ✅ Implemented, tested, and **verified via real successful downloads** — Issue #5 resolved Sept 27 2026 (root cause: VLESS exit-node IP reputation, not this module's code) |
-| 5 | Instagram Downloader | ✅ Implemented, tested, verified — not yet wired |
-| 6 | Telegram Bot Layer | ✅ Implemented for everything that exists so far |
-| 7 | Delivery / Service Layer | 🔲 Not started — in progress now (Track A, Instagram-first) |
+| 5 | Instagram Downloader | ✅ Implemented, tested, verified, and **wired** (Track A, Oct 1 2026) |
+| 6 | Telegram Bot Layer | ✅ Implemented — now includes Instagram + YouTube delivery wiring |
+| 7 | Delivery / Service Layer | ✅ Done (Track A, Oct 1 2026) — verified against real Telegram for both platforms |
 
 ---
 
@@ -81,7 +81,7 @@
 **What can be developed independently:** Yes — this module's public contract (`QualityOption`, `get_available_qualities()`, `download_youtube_video()`) hasn't needed to change shape since Step 7, and any internal fix to the extraction logic can happen entirely inside this file without touching anything that calls it.
 
 **What must be shared with other models:**
-- The `QualityOption` dataclass shape (`format_id`, `label`, `height`, `client`) — `bot/handlers.py` and `bot/keyboards.py` pass these objects around opaquely (never inspecting `.format_id` or `.client` directly beyond diagnostic logging). **If this shape changes, both of those files need a coordinated update** — this is the one real cross-module coupling point for this module, so a model changing `QualityOption`'s fields must flag it explicitly rather than assume it's isolated. This applies directly to Track C (see below) if it ends up adding a PO-token field to the dataclass.
+- The `QualityOption` dataclass shape (`format_id`, `label`, `height`, `client`, `filesize`) — `bot/handlers.py` and `bot/keyboards.py` pass these objects around opaquely (never inspecting `.format_id` or `.client`; `bot/keyboards.py` reads `.label` and `.filesize` for button text only). **`filesize` (estimated bytes, `Optional[int]`, default `None`) was added last on Oct 1 2026 with Moeid's sign-off (Track A)** — existing constructions are unaffected. **If this shape changes again, both of those files need a coordinated update** — this is the one real cross-module coupling point for this module, so a model changing `QualityOption`'s fields must flag it explicitly rather than assume it's isolated. This applies directly to Track C (see below) if it ends up adding a PO-token field to the dataclass.
 - **Issue #5, in full (`CLAUDE.md` §8)** — now resolved, but any model touching this module should still read it: it documents which theories were tried and ruled out (stale yt-dlp pin, missing JS runtime, client/method choice) before the real cause (exit-node IP reputation) was found. That history is directly relevant background for Track C below, since a PO-token provider addresses a different, narrower problem than Issue #5 turned out to be.
 
 **Integration:** `bot/handlers.py` calls `get_available_qualities()` and `download_youtube_video()` directly; no other integration surface.
@@ -102,7 +102,7 @@
 
 **What must be shared with other models:** The `download_instagram_video(url, download_dir=None) -> str` contract and the `InstagramDownloadError` exception type — whichever model builds `services/video_service.py` needs exactly these two things and nothing more from this module.
 
-**Integration:** **Not yet wired to anything.** This is precisely the gap Track A (Delivery / Service Layer, module 7) closes.
+**Integration:** Wired (Track A, Oct 1 2026): `bot/handlers.py`'s `_handle_instagram_url()` calls `download_instagram_video(url, request_dir)` through `services/video_service.py`'s `deliver_video()`. The module itself needed no changes.
 
 ---
 
@@ -112,7 +112,7 @@
 
 **Files:** `bot/handlers.py`, `bot/keyboards.py`
 
-**Dependencies:** `services/language_service.py`, `services/translations.py`, `downloader/manager.py`, `downloader/youtube.py`. (Not yet: `downloader/instagram.py`, `services/video_service.py`, `services/file_service.py` — see Integration below.)
+**Dependencies:** `services/language_service.py`, `services/translations.py`, `services/video_service.py`, `downloader/manager.py`, `downloader/youtube.py`, `downloader/instagram.py`.
 
 **What can be developed independently:** Only loosely — because this module integrates so much, changes here are the most likely to collide with parallel work elsewhere. New features should extend existing patterns (new translation keys, a new callback prefix, a new pending-state key) rather than restructure what's already working.
 
@@ -121,31 +121,35 @@
 - **The `context.user_data` key namespace**: currently just `_PENDING_YOUTUBE_KEY = "pending_youtube_selection"`. Any future feature needing its own pending state (e.g., an eventual Instagram confirmation step, or a "send vs. don't send" choice) needs its own distinct key — reusing this one would silently corrupt the YouTube flow's state.
 - The pending-selection design itself (token generation, consume-before-download, stale/double-tap handling) — see `CLAUDE.md` §5's `bot/handlers.py` notes for the full rationale before modifying any of it.
 
-**Integration:** This module *is* the integration point for everything else. **Track A's delivery wiring will add to this file** (calling `download_instagram_video()` and the not-yet-built `services/video_service.py`/`services/file_service.py` from within `handle_url_message()`'s Instagram branch) — this is expected and is exactly what makes this module "owned by Track A" for the duration of that work. **Track C (see below) must not touch this file** — same isolation rule Track B followed.
+**Integration:** This module *is* the integration point for everything else. Track A's delivery wiring (Instagram + YouTube through `deliver_video()`, via the shared `_video_sender()`) is now complete and this module is no longer owned by any active track. **Track C (see below) must not touch this file** — same isolation rule Track B followed.
 
 ---
 
 ## 7. Delivery / Service Layer
 
-**Responsibilities / scope:** The shared pipeline both platforms need once a file exists on disk: orchestrate the download → send the file back through Telegram → clean up temporary files → handle failures without crashing. **Not started yet** — this is Track A's current work.
+**Status:** ✅ Done — Track A, Oct 1 2026.
 
-**Files:** `services/video_service.py`, `services/file_service.py` (both currently empty stubs), plus additions to `bot/handlers.py` (module 6) to call into them.
+**Responsibilities / scope:** The shared pipeline both platforms use once a download is requested: create a per-request directory → run the download in a worker thread → send the file → clean up (always, unless `KEEP_DOWNLOADS`) → report an outcome without ever raising. Platform-agnostic; no Telegram, yt-dlp, or translation knowledge.
 
-**Dependencies:** `downloader/instagram.py` (module 5) for the first pass; `downloader/youtube.py` (module 4), now unblocked since Issue #5 is resolved; `bot/handlers.py` (module 6) for wiring.
+**Files:** `services/file_service.py`, `services/video_service.py`. (The Telegram-side wiring — `_video_sender()`, `_handle_instagram_url()`, `_download_youtube_and_report()` — lives in `bot/handlers.py`, module 6.)
 
-**What can be developed independently:** The core file-sending and cleanup logic (`services/file_service.py`) can likely be written platform-agnostically from the start — it just needs a file path, regardless of which downloader produced it. `services/video_service.py`'s orchestration logic is where platform-specific branching would live, if any is needed.
+**Dependencies:** `config/settings.py` (`download_dir`, `keep_downloads`). Nothing else.
 
-**What must be shared with other models:** Whatever public interface `video_service.py` settles on (e.g., something like `deliver_instagram_video(update, context, url)`) needs to be communicated to whoever eventually wires in YouTube, so that integration is additive rather than a rewrite. This layer will also need to account for Telegram's ~50 MB bot-upload limit (size-aware quality buttons or a "too large to send" message) and, per Moeid's request, some form of send-vs-don't-send choice for the user — neither of these is designed yet.
+**Public interface (what other modules rely on):**
+- `deliver_video(download_fn, send_fn) -> DeliveryOutcome` where `download_fn(request_dir: str) -> str` is sync (run via `asyncio.to_thread`) and `send_fn(path: str)` is async. `DeliveryOutcome` is `SENT` / `DOWNLOAD_FAILED` / `SEND_FAILED`.
+- `create_request_dir(base_dir=None)` / `cleanup(path, base_dir=None)` in `file_service` (cleanup never raises and refuses paths outside the download dir).
 
-**Integration:** Wires into `bot/handlers.py`'s `handle_url_message()`, replacing the current Instagram placeholder branch. **This is being built against Instagram only for now** — worth keeping the design open to a second platform without speculatively over-engineering a generic multi-platform abstraction before both platforms are ready (Rule 3).
+**What can be developed independently:** Yes — a new platform plugs in by passing a different `download_fn`; nothing in this module changes. Phase 2/3 additions (size checks, retries, concurrency limits, timeouts) belong here.
 
----
+**What must be shared with other models:** `KEEP_DOWNLOADS` semantics (keep the directory when the download succeeded, even if sending failed; always clean up a failed download); that the service catches `Exception` broadly by design; and the decisions recorded in `CLAUDE.md` §2 "Track A decisions" (no size check, no send-vs-don't-send choice, minimal concurrency).
+
+**Integration:** Used by `bot/handlers.py` for both Instagram and YouTube.
 
 ## Shared / high-collision-risk files
 
 These files are touched by more than one module's boundary, or are the kind of shared document two parallel tracks both want to update. Treat any task touching one of these as needing explicit confirmation of scope before starting:
 
-- **`bot/handlers.py`, `bot/keyboards.py`** — the Telegram Bot Layer (module 6). Currently owned by Track A for the duration of the delivery wiring; Track C must not touch these.
+- **`bot/handlers.py`, `bot/keyboards.py`** — the Telegram Bot Layer (module 6). No longer owned by an active track now that Track A is complete; Track C must not touch these.
 - **`CLAUDE.md`, `PROJECT_ROADMAP.md`** — see `AI_COLLABORATION.md` §7 for how documentation-update collisions between parallel tracks are handled.
 - **`requirements.txt`** — a dependency bump for one track is exactly the kind of change that could silently affect another track. Flag any dependency version change explicitly rather than bumping it as a side effect. This applies directly to Track C, which will likely need to add a new package (`bgutil-ytdlp-pot-provider` or similar) — flag it rather than adding it quietly.
 - **`run.py`** — the composition root (builds the `Application`, calls `register_handlers()`, runs the FFmpeg startup check). Low change frequency, but any module needing a new startup-time check (a hypothetical future Deno-presence check, for instance, or eventually a PO-token sidecar health check for Track C — see `CLAUDE.md` §7) would land here.
@@ -154,12 +158,18 @@ These files are touched by more than one module's boundary, or are the kind of s
 
 ## Currently active work (update this section as tracks change)
 
-- **Track A — Instagram delivery pipeline (active).** Owns: module 7 (new), plus additions to module 6. Reads from: module 5 (Instagram downloader, unchanged). Does not touch: module 4 (YouTube downloader). **Newly in scope as of Sept 27 2026:** design and add the video-delivery step (send the downloaded file back through Telegram, respecting the ~50 MB bot-upload limit) and a send-vs-don't-send user choice — see module 7 above and `CLAUDE.md` §2. Since Issue #5 is now resolved, this pipeline should be designed with YouTube's eventual wiring in mind (not built exclusively Instagram-specific), without over-building a generic abstraction before YouTube is actually plugged in.
+- **Track A — Delivery pipeline — ✅ complete Oct 1 2026.** Built module 7 (`file_service`, `video_service`), wired Instagram and YouTube through it in module 6, added `KEEP_DOWNLOADS`, and added `QualityOption.filesize` (module 4, with Moeid's sign-off) for estimated sizes on the quality buttons. Decisions and rationale: `CLAUDE.md` §2 "Track A decisions".
 - **Track B — YouTube extraction fix (Issue #5) — ✅ closed Sept 27 2026.** Was: module 4 only. Root cause found to be VLESS exit-node IP reputation, not this module's code; no changes were made to `downloader/youtube.py`. Full trail in `CLAUDE.md` §8.
 - **Track C — YouTube PO-token provider (`bgutil-ytdlp-pot-provider`), opportunistic — added Sept 27 2026, not started.** Owns: module 4 only, on its own branch, worked on whenever Moeid has time rather than on any deadline. Does not touch: module 6, module 7, or any other module — same isolation rule Track B followed. **Purpose:** not a fix for Issue #5 (that's resolved, and the resolution actually argues against this being an IP-reputation fix — a real, logged-out browser on the flagged exit node produced a genuine token via the real BotGuard challenge and was still blocked, meaning the block was upstream of token validity). Its real value is narrower: it can address two separate, smaller quirks observed during the Issue #5 investigation — the `ios` client's "GVS PO Token" requirement, and `android`'s reduced/SABR-limited format list — by supplying a real Proof-of-Origin token the same way a genuine browser does. **Still anonymous** — no login, no account, no cookies; this is not the cookie/session-auth option Phase 0 explicitly deferred, and should be described that way in any branch/PR to avoid confusion with that separate, still-out-of-scope decision.
+  - **Note (Oct 1 2026):** `downloader/youtube.py` changed during Track A — `QualityOption` gained a `filesize` field and the size-estimation helpers were added. Track C should start from the current file, not an older copy.
   - **Architectural note, unresolved and worth deciding before code is written:** this introduces a new external runtime dependency — a local sidecar process (Docker container, or a native Node/Deno HTTP server, e.g. on port 4416) that must be running alongside the bot. This is the same category of decision as installing Deno was (`CLAUDE.md` §7) — infrastructure the bot now depends on, not just a code change. Two open questions for whoever picks this branch up: Docker-based sidecar vs. a native process (Docker is simpler to run but adds a Docker dependency; native avoids that but is more moving parts to keep alive), and how the bot should be configured to find it — likely a new `Settings` field (e.g. `pot_provider_url`), defaulting to unset/disabled, so the bot degrades cleanly to its current behavior if the sidecar isn't running.
 
+
 ## Open backlog (not started, not currently assigned to either track)
+
+- Re-checking whether language *switching* and a main menu actually exist — `PROJECT_ROADMAP.md` ticks them but `bot/handlers.py` registers no command or button for changing language after the first choice. See `CLAUDE.md` §10.
+- Files over Telegram's ~50 MB bot limit: local Bot API server, or a size warning on buttons. See `CLAUDE.md` §10.
+- Phase 3 concurrency (non-blocking handlers) — PTB currently processes updates sequentially.
 
 - Making `_FALLBACK_CLIENTS` in `downloader/youtube.py` (module 4) configurable via `.env`/`Settings` for diagnostics, without a code change per attempt. Deprioritized now that Issue #5 is resolved and confirmed network-level rather than client/method-level — see `CLAUDE.md` §10.
 - Extending `run.py`'s startup checks to also verify Deno is present, mirroring the existing FFmpeg check — still a reasonable idea independent of Issue #5's resolution, since Deno's necessity for YouTube extraction generally is unrelated to the exit-node issue. Not started.

@@ -21,6 +21,8 @@ from dotenv import load_dotenv
 # itself stays a pure function of whatever mapping it is given.
 load_dotenv()
 
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+
 
 class ConfigurationError(RuntimeError):
     """Raised when required configuration is missing or invalid."""
@@ -40,6 +42,7 @@ class Settings:
     download_dir: str
     db_path: str
     ffmpeg_path: str
+    keep_downloads: bool = False
 
     @classmethod
     def from_env(cls, env: Optional[Mapping[str, str]] = None) -> "Settings":
@@ -66,12 +69,16 @@ class Settings:
         download_dir = (env.get("DOWNLOAD_DIR") or "downloads/").strip()
         db_path = (env.get("DB_PATH") or "bot.db").strip()
         ffmpeg_path = (env.get("FFMPEG_PATH") or "ffmpeg").strip()
+        keep_downloads = (
+            (env.get("KEEP_DOWNLOADS") or "").strip().lower() in _TRUE_VALUES
+        )
 
         return cls(
             bot_token=bot_token,
             download_dir=download_dir,
             db_path=db_path,
             ffmpeg_path=ffmpeg_path,
+            keep_downloads=keep_downloads,
         )
 
 

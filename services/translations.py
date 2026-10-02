@@ -46,17 +46,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "\u062E\u0648\u0627\u0647\u062F \u0634\u062F!"
         ),
     },
-    "url.detected_instagram": {
-        "en": "This looks like an Instagram link \U0001F4F7. Downloading isn't available yet, but support is on the way!",
-        "fa": (
-            "\u0627\u06CC\u0646 \u06CC\u06A9 \u0644\u06CC\u0646\u06A9 "
-            "\u0627\u06CC\u0646\u0633\u062A\u0627\u06AF\u0631\u0627\u0645 "
-            "\u0627\u0633\u062A \U0001F4F7. \u062F\u0627\u0646\u0644\u0648\u062F "
-            "\u0647\u0646\u0648\u0632 \u0641\u0639\u0627\u0644 \u0646\u06CC\u0633\u062A\u060C "
-            "\u0627\u0645\u0627 \u0628\u0647 \u0632\u0648\u062F\u06CC \u0627\u0636\u0627\u0641\u0647 "
-            "\u062E\u0648\u0627\u0647\u062F \u0634\u062F!"
-        ),
-    },
     "url.unsupported": {
         "en": "Sorry, I don't recognize that as a supported link. I currently support YouTube and Instagram.",
         "fa": (
@@ -97,6 +86,19 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "youtube.download_failed": {
         "en": "Sorry, the download failed. Please try again later.",
         "fa": "متأسفانه دانلود ناموفق بود. لطفاً بعداً دوباره امتحان کنید.",
+    },
+    # --- Instagram delivery + shared delivery errors (Track A) ---
+    "instagram.downloading": {
+        "en": "Downloading your Instagram video. This may take a moment...",
+        "fa": "در حال دانلود ویدیوی اینستاگرام. ممکن است کمی طول بکشد...",
+    },
+    "instagram.download_failed": {
+        "en": "Sorry, I couldn't download that Instagram video. It may be private or unavailable. Please try again later.",
+        "fa": "متأسفانه نتوانستم این ویدیوی اینستاگرام را دانلود کنم. ممکن است خصوصی باشد یا در دسترس نباشد. لطفاً بعداً دوباره امتحان کنید.",
+    },
+    "delivery.send_failed": {
+        "en": "The video was downloaded, but I couldn't send it to you. It may be larger than Telegram's 50 MB limit for bots.",
+        "fa": "ویدیو دانلود شد، اما ارسال آن ناموفق بود. ممکن است حجم آن از محدودیت ۵۰ مگابایتی تلگرام برای ربات‌ها بیشتر باشد.",
     },
 }
 

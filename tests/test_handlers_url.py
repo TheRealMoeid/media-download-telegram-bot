@@ -1,11 +1,12 @@
-"""Tests for bot/handlers.py's handle_url_message() - non-YouTube paths.
+"""Tests for bot/handlers.py's handle_url_message() - unsupported-link path.
 
 Mocks get_language and detect_platform (service/manager layer), same
 style as the existing language-selection tests in test_handlers.py -
 fast, isolated, no real detection or storage logic exercised here.
 
-YouTube URLs now trigger the full quality-selection flow instead of a
-placeholder reply - see tests/test_handlers_youtube.py for that.
+YouTube URLs trigger the quality-selection flow (see
+tests/test_handlers_youtube.py); Instagram URLs trigger download +
+delivery (see tests/test_handlers_instagram.py).
 """
 
 from unittest.mock import AsyncMock, MagicMock
@@ -24,23 +25,6 @@ def make_update_for_message(user_id: int, text: str) -> MagicMock:
     update.message.text = text
     update.message.reply_text = AsyncMock()
     return update
-
-
-@pytest.mark.asyncio
-async def test_instagram_url_gets_instagram_reply(monkeypatch):
-    monkeypatch.setattr(handlers_module, "get_language", lambda user_id: "en")
-    monkeypatch.setattr(
-        handlers_module, "detect_platform", lambda url: Platform.INSTAGRAM
-    )
-
-    update = make_update_for_message(222, "https://instagram.com/p/abc")
-    context = MagicMock()
-
-    await handle_url_message(update, context)
-
-    update.message.reply_text.assert_awaited_once_with(
-        translate("url.detected_instagram", "en")
-    )
 
 
 @pytest.mark.asyncio

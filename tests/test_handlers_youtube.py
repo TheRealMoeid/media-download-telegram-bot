@@ -1,8 +1,10 @@
-"""Tests for bot/handlers.py's YouTube quality-selection flow.
+"""Tests for bot/handlers.py's YouTube quality-selection + delivery flow.
 
 Mocks the downloader layer (get_available_qualities, download_youtube_video)
 and get_language, same style as test_handlers.py / test_handlers_url.py -
-fast, isolated, no real yt-dlp or storage. context.user_data is a real
+fast, isolated, no real yt-dlp or storage. The delivery path runs the
+REAL deliver_video() and file_service against tmp_path; only yt-dlp and
+Telegram (context.bot.send_video) are faked. context.user_data is a real
 plain dict on the MagicMock context (python-telegram-bot's own
 ContextTypes.DEFAULT_TYPE.user_data is just a dict-like object), so the
 pending-selection logic itself is exercised for real, not mocked.
@@ -10,11 +12,14 @@ pending-selection logic itself is exercised for real, not mocked.
 
 from __future__ import annotations
 
+import os
+import types
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 import bot.handlers as handlers_module
+import services.file_service as file_service_module
 from bot.handlers import (
     _PENDING_YOUTUBE_KEY,
     handle_url_message,
@@ -29,17 +34,37 @@ from downloader.youtube import (
 from services.translations import translate
 
 
+@pytest.fixture(autouse=True)
+def isolated_download_dir(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        file_service_module,
+        "settings",
+        types.SimpleNamespace(download_dir=str(tmp_path)),
+    )
+    return tmp_path
+
+
+def fake_download(url, option, download_dir):
+    """Stand-in for download_youtube_video(): writes a real file."""
+    path = os.path.join(download_dir, "video.mp4")
+    with open(path, "wb") as f:
+        f.write(b"fake-video")
+    return path
+
+
 def make_context() -> MagicMock:
     context = MagicMock()
     context.user_data = {}
     context.bot.send_message = AsyncMock()
+    context.bot.send_video = AsyncMock()
     return context
 
 
-def make_update_for_message(user_id: int, text: str) -> MagicMock:
+def make_update_for_message(user_id: int, text: str, chat_id: int = 555) -> MagicMock:
     update = MagicMock()
     update.effective_user.id = user_id
     update.message.text = text
+    update.message.chat_id = chat_id
     update.message.reply_text = AsyncMock()
     return update
 
@@ -61,24 +86,29 @@ def make_update_for_quality_callback(
 
 
 @pytest.mark.asyncio
-async def test_single_quality_auto_downloads_and_notifies(monkeypatch):
+async def test_single_quality_auto_downloads_sends_video_and_notifies(
+    monkeypatch, tmp_path
+):
     monkeypatch.setattr(handlers_module, "get_language", lambda user_id: "en")
     monkeypatch.setattr(handlers_module, "detect_platform", lambda url: Platform.YOUTUBE)
     only_option = QualityOption(format_id="22", label="720p", height=720)
     monkeypatch.setattr(
         handlers_module, "get_available_qualities", lambda url: [only_option]
     )
-    download_mock = MagicMock(return_value="/tmp/video.mp4")
+    download_mock = MagicMock(side_effect=fake_download)
     monkeypatch.setattr(handlers_module, "download_youtube_video", download_mock)
 
-    update = make_update_for_message(111, "https://youtube.com/watch?v=abc")
+    update = make_update_for_message(111, "https://youtube.com/watch?v=abc", chat_id=555)
     context = make_context()
 
     await handle_url_message(update, context)
 
-    download_mock.assert_called_once_with(
-        "https://youtube.com/watch?v=abc", only_option
-    )
+    download_mock.assert_called_once()
+    url_arg, option_arg, dir_arg = download_mock.call_args.args
+    assert url_arg == "https://youtube.com/watch?v=abc"
+    assert option_arg is only_option
+    assert os.path.dirname(dir_arg) == str(tmp_path)
+
     assert update.message.reply_text.await_count == 2
     assert update.message.reply_text.await_args_list[0].args[0] == translate(
         "youtube.single_quality_auto", "en", quality="720p"
@@ -86,12 +116,18 @@ async def test_single_quality_auto_downloads_and_notifies(monkeypatch):
     assert update.message.reply_text.await_args_list[1].args[0] == translate(
         "youtube.download_complete", "en", quality="720p"
     )
-    # No menu is left pending after an auto-download.
+
+    context.bot.send_video.assert_awaited_once()
+    assert context.bot.send_video.await_args.kwargs["chat_id"] == 555
+    # No menu is left pending, and the request dir was removed.
     assert _PENDING_YOUTUBE_KEY not in context.user_data
+    assert os.listdir(tmp_path) == []
 
 
 @pytest.mark.asyncio
-async def test_single_quality_download_failure_reports_error(monkeypatch):
+async def test_single_quality_download_failure_reports_error_without_sending(
+    monkeypatch, tmp_path
+):
     monkeypatch.setattr(handlers_module, "get_language", lambda user_id: "en")
     monkeypatch.setattr(handlers_module, "detect_platform", lambda url: Platform.YOUTUBE)
     only_option = QualityOption(format_id="22", label="720p", height=720)
@@ -99,7 +135,7 @@ async def test_single_quality_download_failure_reports_error(monkeypatch):
         handlers_module, "get_available_qualities", lambda url: [only_option]
     )
 
-    def raise_download_error(url, format_id):
+    def raise_download_error(url, option, download_dir):
         raise YouTubeDownloadError("boom")
 
     monkeypatch.setattr(
@@ -114,6 +150,32 @@ async def test_single_quality_download_failure_reports_error(monkeypatch):
     assert update.message.reply_text.await_args_list[-1].args[0] == translate(
         "youtube.download_failed", "en"
     )
+    context.bot.send_video.assert_not_awaited()
+    assert os.listdir(tmp_path) == []
+
+
+@pytest.mark.asyncio
+async def test_single_quality_send_failure_reports_error_not_completion(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(handlers_module, "get_language", lambda user_id: "en")
+    monkeypatch.setattr(handlers_module, "detect_platform", lambda url: Platform.YOUTUBE)
+    only_option = QualityOption(format_id="22", label="720p", height=720)
+    monkeypatch.setattr(
+        handlers_module, "get_available_qualities", lambda url: [only_option]
+    )
+    monkeypatch.setattr(handlers_module, "download_youtube_video", fake_download)
+
+    update = make_update_for_message(111, "https://youtube.com/watch?v=abc")
+    context = make_context()
+    context.bot.send_video = AsyncMock(side_effect=RuntimeError("too large"))
+
+    await handle_url_message(update, context)
+
+    sent_texts = [c.args[0] for c in update.message.reply_text.await_args_list]
+    assert sent_texts[-1] == translate("delivery.send_failed", "en")
+    assert translate("youtube.download_complete", "en", quality="720p") not in sent_texts
+    assert os.listdir(tmp_path) == []
 
 
 # ---------------------------------------------------------------------------
@@ -223,13 +285,15 @@ async def test_a_new_youtube_url_invalidates_a_previous_pending_menu(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_valid_selection_downloads_the_tapped_quality(monkeypatch):
+async def test_valid_selection_downloads_and_sends_the_tapped_quality(
+    monkeypatch, tmp_path
+):
     monkeypatch.setattr(handlers_module, "get_language", lambda user_id: "en")
     options = [
         QualityOption(format_id="137+bestaudio/best", label="1080p", height=1080),
         QualityOption(format_id="22", label="720p", height=720),
     ]
-    download_mock = MagicMock(return_value="/tmp/video.mp4")
+    download_mock = MagicMock(side_effect=fake_download)
     monkeypatch.setattr(handlers_module, "download_youtube_video", download_mock)
 
     context = make_context()
@@ -244,19 +308,25 @@ async def test_valid_selection_downloads_the_tapped_quality(monkeypatch):
     await handle_youtube_quality_selection(update, context)
 
     update.callback_query.answer.assert_awaited_once()
-    download_mock.assert_called_once_with(
-        "https://youtube.com/watch?v=abc", options[0]
-    )
+    download_mock.assert_called_once()
+    url_arg, option_arg, dir_arg = download_mock.call_args.args
+    assert url_arg == "https://youtube.com/watch?v=abc"
+    assert option_arg is options[0]
+    assert os.path.dirname(dir_arg) == str(tmp_path)
+
     assert context.bot.send_message.await_args_list[0].kwargs == {
         "chat_id": 777,
         "text": translate("youtube.download_started", "en", quality="1080p"),
     }
+    context.bot.send_video.assert_awaited_once()
+    assert context.bot.send_video.await_args.kwargs["chat_id"] == 777
     assert context.bot.send_message.await_args_list[1].kwargs == {
         "chat_id": 777,
         "text": translate("youtube.download_complete", "en", quality="1080p"),
     }
-    # Pending selection is consumed.
+    # Pending selection is consumed and the request dir removed.
     assert _PENDING_YOUTUBE_KEY not in context.user_data
+    assert os.listdir(tmp_path) == []
 
 
 @pytest.mark.asyncio
@@ -264,7 +334,7 @@ async def test_selection_download_failure_reports_error(monkeypatch):
     monkeypatch.setattr(handlers_module, "get_language", lambda user_id: "en")
     options = [QualityOption(format_id="22", label="720p", height=720)]
 
-    def raise_download_error(url, format_id):
+    def raise_download_error(url, option, download_dir):
         raise YouTubeDownloadError("boom")
 
     monkeypatch.setattr(
@@ -283,6 +353,28 @@ async def test_selection_download_failure_reports_error(monkeypatch):
 
     last_call = context.bot.send_message.await_args_list[-1]
     assert last_call.kwargs["text"] == translate("youtube.download_failed", "en")
+    context.bot.send_video.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_selection_send_failure_reports_send_failed(monkeypatch):
+    monkeypatch.setattr(handlers_module, "get_language", lambda user_id: "en")
+    options = [QualityOption(format_id="22", label="720p", height=720)]
+    monkeypatch.setattr(handlers_module, "download_youtube_video", fake_download)
+
+    context = make_context()
+    context.bot.send_video = AsyncMock(side_effect=RuntimeError("too large"))
+    context.user_data[_PENDING_YOUTUBE_KEY] = {
+        "token": "tok123",
+        "url": "https://youtube.com/watch?v=abc",
+        "options": options,
+    }
+    update = make_update_for_quality_callback(111, "yt_quality:tok123:0")
+
+    await handle_youtube_quality_selection(update, context)
+
+    last_call = context.bot.send_message.await_args_list[-1]
+    assert last_call.kwargs["text"] == translate("delivery.send_failed", "en")
 
 
 @pytest.mark.asyncio
@@ -314,7 +406,7 @@ async def test_mismatched_token_replies_expired_and_does_not_download(monkeypatc
 async def test_double_tap_only_downloads_once(monkeypatch):
     monkeypatch.setattr(handlers_module, "get_language", lambda user_id: "en")
     options = [QualityOption(format_id="22", label="720p", height=720)]
-    download_mock = MagicMock(return_value="/tmp/video.mp4")
+    download_mock = MagicMock(side_effect=fake_download)
     monkeypatch.setattr(handlers_module, "download_youtube_video", download_mock)
 
     context = make_context()
@@ -331,6 +423,7 @@ async def test_double_tap_only_downloads_once(monkeypatch):
     await handle_youtube_quality_selection(second_tap, context)
 
     download_mock.assert_called_once()
+    context.bot.send_video.assert_awaited_once()
     assert context.bot.send_message.await_args_list[-1].kwargs["text"] == translate(
         "youtube.selection_expired", "en"
     )
@@ -385,7 +478,7 @@ async def test_selection_is_scoped_per_user_via_user_data(monkeypatch):
     scoping rather than a global dict keyed by user id itself."""
     monkeypatch.setattr(handlers_module, "get_language", lambda user_id: "en")
     options = [QualityOption(format_id="22", label="720p", height=720)]
-    download_mock = MagicMock(return_value="/tmp/video.mp4")
+    download_mock = MagicMock(side_effect=fake_download)
     monkeypatch.setattr(handlers_module, "download_youtube_video", download_mock)
 
     context_a = make_context()

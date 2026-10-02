@@ -8,7 +8,6 @@ EXPECTED_KEYS = {
     "choose_language",
     "language_set",
     "url.detected_youtube",
-    "url.detected_instagram",
     "url.unsupported",
     "youtube.choose_quality",
     "youtube.single_quality_auto",
@@ -17,6 +16,9 @@ EXPECTED_KEYS = {
     "youtube.selection_expired",
     "youtube.extraction_failed",
     "youtube.download_failed",
+    "instagram.downloading",
+    "instagram.download_failed",
+    "delivery.send_failed",
 }
 
 
@@ -53,7 +55,7 @@ def test_translate_unknown_language_raises_keyerror():
 
 
 def test_url_translation_keys_are_nonempty_in_both_languages():
-    for key in ("url.detected_youtube", "url.detected_instagram", "url.unsupported"):
+    for key in ("url.detected_youtube", "url.unsupported"):
         assert translate(key, "en").strip()
         assert translate(key, "fa").strip()
 
@@ -64,6 +66,16 @@ def test_youtube_translation_keys_are_nonempty_in_both_languages():
         "youtube.selection_expired",
         "youtube.extraction_failed",
         "youtube.download_failed",
+    ):
+        assert translate(key, "en").strip()
+        assert translate(key, "fa").strip()
+
+
+def test_delivery_translation_keys_are_nonempty_in_both_languages():
+    for key in (
+        "instagram.downloading",
+        "instagram.download_failed",
+        "delivery.send_failed",
     ):
         assert translate(key, "en").strip()
         assert translate(key, "fa").strip()

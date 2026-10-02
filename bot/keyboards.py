@@ -16,6 +16,25 @@ from downloader.youtube import QualityOption
 LANGUAGE_CALLBACK_PREFIX = "set_lang:"
 YOUTUBE_QUALITY_CALLBACK_PREFIX = "yt_quality:"
 
+_MB = 1024 * 1024
+
+
+def format_size(size_bytes: int) -> str:
+    """Human-readable size for a button, e.g. "85 MB" or "1.2 GB"."""
+    mb = size_bytes / _MB
+    if mb < 1:
+        return "<1 MB"
+    if round(mb) >= 1024:
+        return f"{mb / 1024:.1f} GB"
+    return f"{round(mb)} MB"
+
+
+def _quality_button_text(option: QualityOption) -> str:
+    """Button text: the label, plus an approximate size when known."""
+    if option.filesize:
+        return f"{option.label} (~{format_size(option.filesize)})"
+    return option.label
+
 
 def language_selection_keyboard() -> InlineKeyboardMarkup:
     """Build the Persian / English language-selection inline keyboard."""
@@ -44,15 +63,17 @@ def youtube_quality_keyboard(
     what downloader.youtube.get_available_qualities() returned for this
     specific video - this function never invents or assumes qualities.
 
-    Each button's callback_data encodes only the token and the option's
-    position in `options` (e.g. "yt_quality:AbC123:0") - never the raw
-    URL or yt-dlp format id, so handlers.py can validate the tap against
-    the still-pending selection before trusting anything in it.
+    Each button shows the quality label and, when known, an approximate
+    file size (e.g. "1080p (~85 MB)"). Each button's callback_data
+    encodes only the token and the option's position in `options`
+    (e.g. "yt_quality:AbC123:0") - never the raw URL or yt-dlp format
+    id, so handlers.py can validate the tap against the still-pending
+    selection before trusting anything in it.
     """
     buttons = [
         [
             InlineKeyboardButton(
-                option.label,
+                _quality_button_text(option),
                 callback_data=f"{YOUTUBE_QUALITY_CALLBACK_PREFIX}{token}:{index}",
             )
         ]
