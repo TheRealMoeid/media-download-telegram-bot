@@ -417,46 +417,38 @@ A bot that works only when everything goes perfectly is not a usable application
 
 ## Tasks
 
-### Validation
+Phase 2 is split into six independently implementable sections (2A–2F). Out of scope for Phase 2: size limits, rate limits, concurrency, cancellation (Phase 3).
 
-- [ ] Improve URL validation.
-- [ ] Detect malformed URLs.
-- [ ] Detect unsupported platforms.
-- [ ] Handle unavailable/private/deleted media.
+### 2A — Logging
+- [ ] Console + rotating file logging in `logs/`.
+- [ ] Silence `httpx`/`httpcore` INFO logs (they print the bot token in URLs); add a token-redaction filter.
+- [ ] Optional `LOG_LEVEL` setting.
+- [ ] Consistent, useful failure context; never log secrets.
 
-### Error handling
+### 2B — URL validation
+- [ ] Extract a URL from surrounding text.
+- [ ] Distinguish not-a-URL, unsupported host, and supported-host-wrong-shape (channel/playlist/profile/story).
+- [ ] Specific translated message per reason; `detect_platform()` stays backward compatible.
 
-- [ ] Categorize download failures.
-- [ ] Handle FFmpeg failures.
-- [ ] Handle Telegram upload failures.
-- [ ] Handle unexpected exceptions.
-- [ ] Ensure users receive understandable messages.
+### 2C — Failure classification
+- [ ] Shared `FailureReason` categories (unavailable, age-restricted, geo-blocked, bot-check, network, FFmpeg, unknown).
+- [ ] Map yt-dlp errors to categories; attach to existing exceptions without changing their types.
 
-### Logging
+### 2D — Telegram-side failures and global error handler
+- [ ] Distinguish send failures (too large, timeout, network) by detection only.
+- [ ] Register a global error handler (log + translated generic message; never raises).
+- [ ] Re-verify cleanup on every failure path.
 
-- [ ] Add consistent application logs.
-- [ ] Log important failures.
-- [ ] Avoid logging secrets.
-- [ ] Include enough context to diagnose problems.
+### 2E — UX polish
+- [ ] Specific translated messages per failure category, both languages.
+- [ ] Remove dead `url.detected_youtube` key.
+- [ ] Simple Retry for network-type failures (no Cancel; that is Phase 3).
+- [ ] Remove stale menu keyboards where practical; native review of Persian wording.
 
-### User experience
-
-- [ ] Improve status messages.
-- [ ] Improve language-specific messages.
-- [ ] Improve quality-selection UI.
-- [ ] Handle stale callback buttons.
-- [ ] Add clear retry/cancel behavior where appropriate.
-
-### Testing
-
-- [ ] Test valid URLs.
-- [ ] Test invalid URLs.
-- [ ] Test both languages.
-- [ ] Test language switching.
-- [ ] Test Instagram downloads.
-- [ ] Test YouTube quality selection.
-- [ ] Test failed downloads.
-- [ ] Test cleanup after failures.
+### 2F — Test hardening
+- [ ] Translation parity test (keys, languages, placeholders).
+- [ ] Both-language flow tests; failure/cleanup tests for both platforms.
+- [ ] Recount and record the real test total.
 
 ## Expected result
 
@@ -1392,7 +1384,7 @@ The Phase 1 target was:
 
 The next implementation work moves to **Phase 2 — Reliability, Validation & User Experience**. Remaining Phase 1 leftovers are small cleanup items listed in `CLAUDE.md` §10 (e.g. an unused translation key), not missing requirements.
 
-**Current status (as of Oct 2 2026, Phase 1 complete):** Language (including switching via `/menu` → Settings → Language), config, URL handling, both downloaders, and the delivery pipeline are done and manually verified against real Telegram. Instagram and YouTube both download, send the video back, and clean up; YouTube quality buttons show estimated sizes. The YouTube extraction blocker (Issue #5) is resolved. The bot is being built for Moeid's personal use, so some public-bot concerns (size pre-checks, real concurrency) are intentionally deferred — see `CLAUDE.md` §2 "Track A decisions" and §10 for open items. Only the opportunistic Track C (YouTube PO-token provider) remains from the multi-model split; see `MODULES.md` and `AI_COLLABORATION.md` for how it is coordinated.
+**Current status (as of Oct 2 2026, Phase 1 complete):** Language (including switching via `/menu` → Settings → Language), config, URL handling, both downloaders, and the delivery pipeline are done and manually verified against real Telegram. Instagram and YouTube both download, send the video back, and clean up; YouTube quality buttons show estimated sizes. The YouTube extraction blocker (Issue #5) is resolved. The bot is being built for Moeid's personal use, so some public-bot concerns (size pre-checks, real concurrency) are intentionally deferred — see `CLAUDE.md` §2 "Track A decisions" and §10 for open items. Only the opportunistic Track C (YouTube PO-token provider) remains from the multi-model split; see `MODULES.md` and `AI_COLLABORATION.md` for how it is coordinated.**Phase 2 started.** Work is split into sections 2A–2F; see `PHASE_2_START_HERE.md` for order, file ownership and per-section briefs. First section: 2A (logging).
 
 ---
 

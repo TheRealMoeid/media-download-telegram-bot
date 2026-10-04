@@ -35,6 +35,8 @@ Full rationale and the complete 9-phase plan live in `PROJECT_ROADMAP.md` (repo 
 | Delivery + cleanup (`services/video_service.py`, `services/file_service.py`) | ✅ Done (Track A, Oct 1 2026) — `deliver_video(download_fn, send_fn)` with per-request temp dirs, `asyncio.to_thread`, guaranteed cleanup, optional `KEEP_DOWNLOADS`. Manually verified. |
 | Main menu + language switching (`/menu`) | ✅ Done (Oct 2 2026) — `/menu` → Settings → Language → existing picker; language can now be changed after the first choice. Full test suite green on Moeid's machine and **manually verified against real Telegram** (switched fa → en and back, `/start` and `/menu` respect the saved language). |
 
+**Phase 2 (Reliability, Validation & UX) is in progress.** Six independent sections 2A–2F; see `PHASE_2_START_HERE.md` and `MODULES.md` "Currently active work". Update this section as each lands.
+
 **Work was split into independent, parallel tracks** (see `AI_COLLABORATION.md` and `MODULES.md` for the full coordination model). Track A and Track B are now closed; only Track C remains:
 
 1. **Track A — Delivery pipeline — ✅ complete Oct 1 2026.** Built `services/file_service.py` and `services/video_service.py`, wired both Instagram and YouTube through them in `bot/handlers.py`, added the `KEEP_DOWNLOADS` setting, and added estimated sizes to the YouTube quality buttons (`QualityOption.filesize`). See "Track A decisions" below for what was decided along the way.
@@ -383,6 +385,9 @@ Downloader Bot/
 - **Dead translation key** `url.detected_youtube` (unused since Step 7; its text is now false). Safe to remove together with its test entries.
 - **`docs/` mirror:** `docs/PROJECT_ROADMAP.md` needs re-copying from the root file after the Oct 2 2026 update (root is canonical).
 - `media-download-telegram-bot-architecture.md` status line refreshed Oct 2 2026. `README.md` still needs the small `/menu` edits (status line, behavior table row, "Known limitations" language-switching bullet, roadmap open-items bullet) — provided separately, not applied by Claude.
+- **Security finding (Phase 2A):** `run.py` configures logging at INFO and PTB uses httpx, which logs request URLs containing the bot token. Fixed by 2A (httpx/httpcore to WARNING + redaction filter). If logs from before 2A were ever shared, rotate the token via @BotFather.
+- **Verify before 2E:** the code snapshot reviewed on Oct 3 2026 had no `/menu` handlers or `tests/test_menu.py`, although this file says the menu was completed Oct 2. Confirm the menu code is on the branch Phase 2 starts from.
+- **README.md is stale** about language switching (still lists it as not implemented). Update the status line, behavior table and Known limitations once the menu is confirmed present.
 
 ---
 

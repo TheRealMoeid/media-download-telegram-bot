@@ -157,6 +157,14 @@ These files are touched by more than one module's boundary, or are the kind of s
 ---
 
 ## Currently active work (update this section as tracks change)
+- **Phase 2 — Reliability, Validation & UX — started.** Sections and ownership:
+  - **2A Logging** — `run.py`, `config/settings.py`, `.env.example`. Not started.
+  - **2B URL validation** — `downloader/manager.py` (+ `url.*` translation keys, minimal `handle_url_message` edit). Not started.
+  - **2C Failure classification** — new `downloader/errors.py`, `downloader/instagram.py`, `downloader/youtube.py`. Not started. Adds a `reason` attribute to the downloader exceptions (contract change, flagged).
+  - **2D Telegram-side failures + global error handler** — `services/video_service.py`, `run.py`, minimal error handler in `bot/handlers.py`. Not started. Depends on 2A. Merge 2A before 2D (both touch `run.py`).
+  - **2E UX polish** — `bot/handlers.py`, `bot/keyboards.py`, `services/translations.py`. Not started. Depends on 2B, 2C, 2D. Run alone (highest-collision files).
+  - **2F Test hardening** — `tests/` only. Not started.
+  - 2A, 2B and 2C are parallel-safe. Merge 2B before 2E (both add translation keys).
 
 - **Track A — Delivery pipeline — ✅ complete Oct 1 2026.** Built module 7 (`file_service`, `video_service`), wired Instagram and YouTube through it in module 6, added `KEEP_DOWNLOADS`, and added `QualityOption.filesize` (module 4, with Moeid's sign-off) for estimated sizes on the quality buttons. Decisions and rationale: `CLAUDE.md` §2 "Track A decisions".
 - **Menu / language switching — ✅ complete Oct 2 2026** (not a parallel track). Touched module 6 (`bot/handlers.py`, `bot/keyboards.py`) and module 2 (`services/translations.py`, five `menu.*` keys). No change to any downloader or to modules 1, 3, 4, 5, 7. Decisions: `CLAUDE.md` §2 "Menu decisions".
