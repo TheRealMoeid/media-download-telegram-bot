@@ -37,6 +37,8 @@ Full rationale and the complete 9-phase plan live in `PROJECT_ROADMAP.md` (repo 
 
 **Phase 2 (Reliability, Validation & UX) is in progress.** Six independent sections 2A–2F; see `PHASE_2_START_HERE.md` and `MODULES.md` "Currently active work". Update this section as each lands.
 
+**Phase 2 progress:** 2A (logging) ✅ done Oct 5 2026 — console + rotating file logging (`logs/bot.log`), `httpx`/`httpcore` capped at WARNING, the bot token redacted from all output, optional `LOG_LEVEL`. Manually verified: no token in the terminal or the log file. Next: 2B and 2C (parallel-safe), then 2D, 2E, 2F.
+
 **Work was split into independent, parallel tracks** (see `AI_COLLABORATION.md` and `MODULES.md` for the full coordination model). Track A and Track B are now closed; only Track C remains:
 
 1. **Track A — Delivery pipeline — ✅ complete Oct 1 2026.** Built `services/file_service.py` and `services/video_service.py`, wired both Instagram and YouTube through them in `bot/handlers.py`, added the `KEEP_DOWNLOADS` setting, and added estimated sizes to the YouTube quality buttons (`QualityOption.filesize`). See "Track A decisions" below for what was decided along the way.
@@ -108,8 +110,8 @@ Downloader Bot/
 │   └── keyboards.py        # language_selection_keyboard(back_label=None), main_menu_keyboard(), settings_keyboard(), youtube_quality_keyboard() (buttons show estimated sizes), format_size()
 ├── config/
 │   ├── __init__.py
-│   └── settings.py         # frozen Settings dataclass, Settings.from_env(), module singleton `settings`
-├── downloader/
+│   ├── settings.py         # frozen Settings dataclass, Settings.from_env(), module singleton `settings`
+│   └── logging_setup.py    # configure_logging(), RedactingFormatter: console + rotating file logging, token redaction (2A)├── downloader/
 │   ├── __init__.py
 │   ├── instagram.py        # download_instagram_video() — anonymous yt-dlp extraction, Step 6, done + verified + wired (Track A)
 │   ├── youtube.py          # get_available_qualities() / download_youtube_video() — Step 7, done + verified + wired; QualityOption carries estimated filesize
@@ -123,6 +125,7 @@ Downloader Bot/
 ├── tests/
 │   ├── __init__.py
 │   ├── test_settings.py            # 6 tests
+│   ├── test_logging_setup.py       # httpx silenced, token redaction (message + traceback), rotation, level, idempotency (2A)
 │   ├── test_language_service.py    # 8 tests
 │   ├── test_translations.py        # tests for translate(), incl. url.*, youtube.* and menu.* keys, kwargs formatting
 │   ├── test_handlers.py            # unit tests, service layer mocked — 4 tests
@@ -163,6 +166,14 @@ Downloader Bot/
 - Raises `ConfigurationError` if `BOT_TOKEN` is missing or blank.
 - `load_dotenv()` called at module import time.
 - Module-level singleton `settings = Settings.from_env()` built at import time — **this means importing `config.settings` anywhere requires `BOT_TOKEN` to already be resolvable** (real `.env` in production, or the env var set explicitly in tests/sandboxes).
+ `log_level` (default `"INFO"`; env `LOG_LEVEL`; one of DEBUG/INFO/WARNING/ERROR/CRITICAL, case-insensitive, blank means INFO; any other value raises `ConfigurationError`; added Oct 5 2026, 2A).
+
+### `config/logging_setup.py` (Phase 2A)
+- `configure_logging(token, level="INFO", log_file="logs/bot.log", max_bytes=1_000_000, backup_count=3)` — installs a console handler and a `RotatingFileHandler` on the root logger, sets the root level, and caps the `httpx` and `httpcore` loggers at WARNING. Safe to call twice (handlers it installed earlier are replaced, not duplicated). Creates the log directory if missing.
+- **Why two layers:** python-telegram-bot uses httpx, which logs request URLs at INFO, and Telegram API URLs contain the bot token (`.../bot<TOKEN>/getUpdates`). Layer 1 (cap at WARNING) stops those lines being emitted. Layer 2 (`RedactingFormatter`) scrubs the token from the *final formatted text* of everything that is emitted, including tracebacks (httpx error messages often embed the URL). It replaces the exact configured token and anything shaped like `/bot<id>:<secret>`.
+- **Formatter, not filter:** a logging filter only sees the record's message, not the traceback text produced later by the formatter, so redaction lives in the formatter. Limitation: it only protects handlers installed by `configure_logging()`; a handler added elsewhere (e.g. pytest's `caplog`) sees raw records.
+- Does not import `config.settings` (which needs `BOT_TOKEN` at import time); `run.py` passes `settings.bot_token` and `settings.log_level` in. This also keeps it testable with a fake token and `tmp_path`.
+- Never logs the yt-dlp options dict or `.env` contents (nothing in the codebase does; keep it that way).
 
 ### `services/language_service.py`
 - Table: `user_language(user_id INTEGER PRIMARY KEY, language TEXT NOT NULL)`.
@@ -272,7 +283,7 @@ Downloader Bot/
 
 ### `run.py`
 - `check_ffmpeg(ffmpeg_path)` — small, standalone, directly-testable function using `shutil.which()`. Raises `RuntimeError` with a clear message if not found. Deliberately **not** a separate `bot/startup.py` module — Moeid's explicit call: not worth a new module for one Phase 1 check.
-- `main()` — sets up `logging.basicConfig`, calls `check_ffmpeg(settings.ffmpeg_path)`, builds the `Application` via `Application.builder().token(settings.bot_token).build()`, calls `register_handlers(application)`, then `application.run_polling()`.
+- `main()` — calls `configure_logging(settings.bot_token, settings.log_level)` (2A; replaced the old `logging.basicConfig`), calls `check_ffmpeg(settings.ffmpeg_path)`, builds the `Application` via `Application.builder().token(settings.bot_token).build()`, calls `register_handlers(application)`, then `application.run_polling()`.
 
 ---
 
@@ -298,7 +309,7 @@ Downloader Bot/
 - **Deno (added during YouTube troubleshooting, see Issue #5):** `deno 2.9.7`, installed via `winget install --id=DenoLand.Deno`, confirmed on PATH. Required by yt-dlp `2025.11.12+` for full YouTube support (an external JS runtime is needed to solve YouTube's JS challenge) — **this is a genuine yt-dlp prerequisite regardless of Issue #5's outcome**, but installing it did **not** resolve the "Sign in to confirm you're not a bot" failure; see Issue #5 for the full story. Same PATH-propagation gotcha as FFmpeg: a `winget install` doesn't take effect in terminal sessions already open at the time — always open a fresh terminal before testing.
 - **Local proxy (confirmed root cause of Issue #5, now resolved):** Moeid's traffic (most apps, including this bot's yt-dlp calls) routes through a local VLESS-based proxy (visible in yt-dlp's debug output as `Proxy map: {'http': 'http://127.0.0.1:10808', ...}`) for censorship-circumvention reasons. This is a real, permanent feature of the environment, not a toggle to casually disable for testing — yt-dlp cannot reach YouTube at all with the proxy fully bypassed on this network (confirmed via `proxy=""` testing, which produced connection-refused/timeout errors rather than a clean direct connection). What Issue #5's investigation did establish: the specific **exit node** the VLESS client connects through matters a great deal — the Germany exit node used throughout the original investigation had poor enough IP reputation with YouTube to trigger "sign in to confirm you're not a bot" fairly consistently (confirmed by a logged-out real browser hitting the same wall), while switching to a Netherlands exit node cleared it immediately. Exit-node reputation should now be treated as a normal operational variable for this bot, not a fixed environmental constant — see Issue #5 in §8.
 - **Core stack versions actually in use:** see `requirements.txt` — currently `python-telegram-bot==22.8` (bumped from `21.6`, see Issue #2), `yt-dlp==2026.8.19` (**confirmed latest on PyPI** as of the Issue #5 investigation — an upgrade alone will not fix that issue), `python-dotenv==1.2.2`, `pytest==9.0.3`, `pytest-asyncio==1.4.0`.
-- **`.env` notes:** `.env` must be plain `KEY=value` lines — no PowerShell wrapper text (see Issue #6). Optional `KEEP_DOWNLOADS=true` keeps downloaded videos in `downloads/req_xxxx/` (nothing cleans them up automatically; `downloads/` is gitignored).
+- **`.env` notes:** `.env` must be plain `KEY=value` lines — no PowerShell wrapper text (see Issue #6). Optional `KEEP_DOWNLOADS=true` keeps downloaded videos in `downloads/req_xxxx/` (nothing cleans them up automatically; `downloads/` is gitignored).  Optional `LOG_LEVEL` (default `INFO`) sets verbosity. Logs go to the console and to `logs/bot.log` (rotating, gitignored).
 - **Branching:** work happens on short-lived feature branches (`URL-hanling`, `instagram-download`, etc.) merged into `phase-1`; `main` holds the docs/architecture baseline. Always confirm the actual current branch (`git branch --show-current`) before assuming file state — don't assume a doc or module is missing just because it isn't in the branch expected; check `git log --oneline` for merge history first.
 - **Change delivery workflow:** discuss approach in chat → Moeid picks → Claude builds+tests in sandbox → Claude generates a `.patch` via `git diff --cached`, verifies clean apply on a fresh tree → Claude presents the `.patch` → Moeid applies with `git apply`. **Caveat learned the hard way (see Issue #3): this doesn't always work cleanly for edits to existing files** — prefer it for **new files** (low risk, no context-matching needed), fall back to direct instructions/manual edits for small single-line changes to existing files if a patch fails. **For `docs/CLAUDE.md` and `docs/PROJECT_ROADMAP.md` specifically: these are supplied to Claude directly via memory/project context already up to date - Claude must edit that known content directly and hand back the full file, never attempt to fetch or re-derive them from GitHub or assume a different repo layout (see Issue #4).**
 
@@ -352,6 +363,7 @@ Downloader Bot/
 - **Fix:** removed the wrapper lines from `.env` (Moeid) and replaced `.env.example` with plain `KEY=value` content (also documents `KEEP_DOWNLOADS`).
 - **Status:** fix applied; Moeid didn't explicitly confirm the warning is gone — if it reappears, re-check `.env` line 14.
 - **Lesson:** when a config file is created via a shell heredoc, check the file itself afterwards for wrapper syntax.
+- **Recurrence (Oct 4 2026):** the `.env.example` in the repo snapshot again contained the wrapper (a stray `'` first line and a `| Set-Content` last line). Replaced with a clean copy during 2A. When this warning appears, check `.env` and `.env.example` together.
 
 ---
 
@@ -385,7 +397,8 @@ Downloader Bot/
 - **Dead translation key** `url.detected_youtube` (unused since Step 7; its text is now false). Safe to remove together with its test entries.
 - **`docs/` mirror:** `docs/PROJECT_ROADMAP.md` needs re-copying from the root file after the Oct 2 2026 update (root is canonical).
 - `media-download-telegram-bot-architecture.md` status line refreshed Oct 2 2026. `README.md` still needs the small `/menu` edits (status line, behavior table row, "Known limitations" language-switching bullet, roadmap open-items bullet) — provided separately, not applied by Claude.
-- **Security finding (Phase 2A):** `run.py` configures logging at INFO and PTB uses httpx, which logs request URLs containing the bot token. Fixed by 2A (httpx/httpcore to WARNING + redaction filter). If logs from before 2A were ever shared, rotate the token via @BotFather.
+- ✅ **Security finding (Phase 2A) — resolved Oct 5 2026.** `run.py` used to log at INFO, so httpx printed request URLs containing the bot token on every poll. Fixed by 2A (httpx/httpcore capped at WARNING plus a redacting formatter); verified by test and by manual check (no token in terminal or `logs/bot.log`). Tokens from logs shared before 2A should be rotated via @BotFather.
+- **Logging gaps noted during 2A (not fixed there; for 2D/2E):** handlers log nothing on receiving a request or on success (no user/chat id, platform or outcome line), so a failure is hard to correlate; `deliver_video` logs download/send failures with tracebacks but not which URL or platform; the 2D global error handler should log chat and user id.
 - **Verify before 2E:** the code snapshot reviewed on Oct 3 2026 had no `/menu` handlers or `tests/test_menu.py`, although this file says the menu was completed Oct 2. Confirm the menu code is on the branch Phase 2 starts from.
 - **README.md is stale** about language switching (still lists it as not implemented). Update the status line, behavior table and Known limitations once the menu is confirmed present.
 

@@ -75,3 +75,31 @@ def test_settings_instance_is_frozen():
 
     with pytest.raises(AttributeError):
         settings.bot_token = "changed"
+
+
+# --- LOG_LEVEL (Phase 2A) ----------------------------------------------
+
+
+def test_log_level_defaults_to_info():
+    settings = Settings.from_env(env={"BOT_TOKEN": "abc"})
+
+    assert settings.log_level == "INFO"
+
+
+def test_log_level_blank_falls_back_to_info():
+    settings = Settings.from_env(env={"BOT_TOKEN": "abc", "LOG_LEVEL": "   "})
+
+    assert settings.log_level == "INFO"
+
+
+@pytest.mark.parametrize("value", ["debug", "DEBUG", " Warning ", "error", "CRITICAL"])
+def test_log_level_accepts_valid_names_case_insensitively(value):
+    settings = Settings.from_env(env={"BOT_TOKEN": "abc", "LOG_LEVEL": value})
+
+    assert settings.log_level == value.strip().upper()
+
+
+@pytest.mark.parametrize("value", ["verbose", "10", "warn"])
+def test_log_level_rejects_invalid_names(value):
+    with pytest.raises(ConfigurationError):
+        Settings.from_env(env={"BOT_TOKEN": "abc", "LOG_LEVEL": value})

@@ -41,7 +41,7 @@ A modular Python Telegram bot that downloads videos from **YouTube** and **Insta
 | Config | `python-dotenv==1.2.2` | Loads `.env` |
 | Storage | SQLite (stdlib) | Language preferences only |
 | Tests | `pytest==9.0.3`, `pytest-asyncio==1.4.0` | `unittest.mock` for isolation; no real network calls |
-| Logging | stdlib `logging` | Basic in Phase 1 |
+| Logging | stdlib `logging` | Console + rotating file (`logs/bot.log`); bot token redacted from all output |
 
 ---
 
@@ -76,6 +76,7 @@ DOWNLOAD_DIR=downloads/
 DB_PATH=bot.db
 FFMPEG_PATH=ffmpeg
 KEEP_DOWNLOADS=false
+LOG_LEVEL=INFO
 ```
 
 | Variable | Required | Default | Description |
@@ -85,6 +86,7 @@ KEEP_DOWNLOADS=false
 | `DB_PATH` | No | `bot.db` | SQLite file for language preferences. |
 | `FFMPEG_PATH` | No | `ffmpeg` | FFmpeg executable name or full path. Validated at startup and passed explicitly to yt-dlp. |
 | `KEEP_DOWNLOADS` | No | `false` | Truthy values: `1`, `true`, `yes`, `on` (case-insensitive). Keeps `downloads/req_xxxx/` when the download succeeded, even if sending failed. Nothing deletes kept files automatically. |
+| `LOG_LEVEL` | No | `INFO` | One of `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` (case-insensitive). An invalid value stops startup with `ConfigurationError`. Logs go to the console and `logs/bot.log` (rotating, 1 MB x 3). |
 
 > Importing `config.settings` anywhere requires `BOT_TOKEN` to be resolvable, including in scripts and sandboxes.
 
@@ -107,8 +109,8 @@ Downloader Bot/
 │   │                        # YouTube quality flow, shared video sender, handler registration
 │   └── keyboards.py         # Language keyboard, YouTube quality keyboard (with size labels)
 ├── config/
-│   └── settings.py          # Frozen Settings dataclass, Settings.from_env(), `settings` singleton
-├── downloader/
+│   ├── settings.py          # Frozen Settings dataclass, Settings.from_env(), `settings` singleton
+│   └── logging_setup.py     # Console + rotating-file logging, bot-token redaction├── downloader/
 │   ├── manager.py           # Platform enum + detect_platform() (pure function)
 │   ├── instagram.py         # download_instagram_video() - anonymous yt-dlp, best quality
 │   └── youtube.py           # get_available_qualities() / download_youtube_video()

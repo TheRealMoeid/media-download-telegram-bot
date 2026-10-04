@@ -420,10 +420,10 @@ A bot that works only when everything goes perfectly is not a usable application
 Phase 2 is split into six independently implementable sections (2A–2F). Out of scope for Phase 2: size limits, rate limits, concurrency, cancellation (Phase 3).
 
 ### 2A — Logging
-- [ ] Console + rotating file logging in `logs/`.
-- [ ] Silence `httpx`/`httpcore` INFO logs (they print the bot token in URLs); add a token-redaction filter.
-- [ ] Optional `LOG_LEVEL` setting.
-- [ ] Consistent, useful failure context; never log secrets.
+- [✅] Console + rotating file logging in `logs/`. (`logs/bot.log`, 1 MB x 3 backups; Oct 5 2026.)
+- [✅] Silence `httpx`/`httpcore` INFO logs (they print the bot token in URLs); add a token-redaction filter. (Implemented as a redacting formatter, which also covers tracebacks.)
+- [✅] Optional `LOG_LEVEL` setting.
+- [ ] Consistent, useful failure context; never log secrets. (Secrets: done. Context gaps are listed in `CLAUDE.md` §10 and belong to 2D/2E.)
 
 ### 2B — URL validation
 - [ ] Extract a URL from surrounding text.
@@ -1384,7 +1384,7 @@ The Phase 1 target was:
 
 The next implementation work moves to **Phase 2 — Reliability, Validation & User Experience**. Remaining Phase 1 leftovers are small cleanup items listed in `CLAUDE.md` §10 (e.g. an unused translation key), not missing requirements.
 
-**Current status (as of Oct 2 2026, Phase 1 complete):** Language (including switching via `/menu` → Settings → Language), config, URL handling, both downloaders, and the delivery pipeline are done and manually verified against real Telegram. Instagram and YouTube both download, send the video back, and clean up; YouTube quality buttons show estimated sizes. The YouTube extraction blocker (Issue #5) is resolved. The bot is being built for Moeid's personal use, so some public-bot concerns (size pre-checks, real concurrency) are intentionally deferred — see `CLAUDE.md` §2 "Track A decisions" and §10 for open items. Only the opportunistic Track C (YouTube PO-token provider) remains from the multi-model split; see `MODULES.md` and `AI_COLLABORATION.md` for how it is coordinated.**Phase 2 started.** Work is split into sections 2A–2F; see `PHASE_2_START_HERE.md` for order, file ownership and per-section briefs. First section: 2A (logging).
+**Current status (as of Oct 2 2026, Phase 1 complete):** Language (including switching via `/menu` → Settings → Language), config, URL handling, both downloaders, and the delivery pipeline are done and manually verified against real Telegram. Instagram and YouTube both download, send the video back, and clean up; YouTube quality buttons show estimated sizes. The YouTube extraction blocker (Issue #5) is resolved. The bot is being built for Moeid's personal use, so some public-bot concerns (size pre-checks, real concurrency) are intentionally deferred — see `CLAUDE.md` §2 "Track A decisions" and §10 for open items. Only the opportunistic Track C (YouTube PO-token provider) remains from the multi-model split; see `MODULES.md` and `AI_COLLABORATION.md` for how it is coordinated.**Phase 2 started.** Work is split into sections 2A–2F; see `PHASE_2_START_HERE.md` for order, file ownership and per-section briefs. 2A (logging) is complete (Oct 5 2026). Next: 2B and 2C (parallel-safe), then 2D, 2E, 2F.
 
 ---
 

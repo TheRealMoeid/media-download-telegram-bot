@@ -24,13 +24,13 @@
 
 **Responsibilities / scope:** Load and validate environment-based configuration. Nothing else — no operational checks (FFmpeg's actual executability lives in `run.py`, deliberately, per `CLAUDE.md` §5).
 
-**Files:** `config/settings.py`
+**Files:** `config/settings.py`, `config/logging_setup.py`
 
 **Dependencies:** None on other project modules. Depends only on `python-dotenv` and stdlib.
 
 **What can be developed independently:** Everything — this is the most independent module in the project.
 
-**What must be shared with other models:** The `Settings` dataclass's field names and types (`bot_token`, `download_dir`, `db_path`, `ffmpeg_path`) — nearly every other module reads at least one of these via the module-level `settings` singleton. **Critical gotcha to communicate to any model touching almost anything in this repo:** importing `config.settings` anywhere requires `BOT_TOKEN` to already be resolvable (real `.env`, or the env var set explicitly) — this affects how sandboxed test runs and diagnostic scripts must be set up, and has bitten past sessions who forgot it.
+**What must be shared with other models:** The `Settings` dataclass's field names and types (`bot_token`, `download_dir`, `db_path`, `ffmpeg_path`, `keep_downloads`, `log_level`) — nearly every other module reads at least one of these via the module-level `settings` singleton. **Critical gotcha to communicate to any model touching almost anything in this repo:** importing `config.settings` anywhere requires `BOT_TOKEN` to already be resolvable (real `.env`, or the env var set explicitly) — this affects how sandboxed test runs and diagnostic scripts must be set up, and has bitten past sessions who forgot it.
 
 **Integration:** No integration step needed — it's a leaf dependency everything else imports from.
 
@@ -158,8 +158,7 @@ These files are touched by more than one module's boundary, or are the kind of s
 
 ## Currently active work (update this section as tracks change)
 - **Phase 2 — Reliability, Validation & UX — started.** Sections and ownership:
-  - **2A Logging** — `run.py`, `config/settings.py`, `.env.example`. Not started.
-  - **2B URL validation** — `downloader/manager.py` (+ `url.*` translation keys, minimal `handle_url_message` edit). Not started.
+  - **2A Logging** — ✅ done Oct 5 2026. Touched `run.py`, `config/settings.py`, `.env.example`; added `config/logging_setup.py` (`configure_logging(token, level)`, `RedactingFormatter`). `run.py` now calls `configure_logging()` in place of `logging.basicConfig`; 2D must merge on top of this.  - **2B URL validation** — `downloader/manager.py` (+ `url.*` translation keys, minimal `handle_url_message` edit). Not started.
   - **2C Failure classification** — new `downloader/errors.py`, `downloader/instagram.py`, `downloader/youtube.py`. Not started. Adds a `reason` attribute to the downloader exceptions (contract change, flagged).
   - **2D Telegram-side failures + global error handler** — `services/video_service.py`, `run.py`, minimal error handler in `bot/handlers.py`. Not started. Depends on 2A. Merge 2A before 2D (both touch `run.py`).
   - **2E UX polish** — `bot/handlers.py`, `bot/keyboards.py`, `services/translations.py`. Not started. Depends on 2B, 2C, 2D. Run alone (highest-collision files).

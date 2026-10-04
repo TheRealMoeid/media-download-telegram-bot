@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
+_VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
 
 class ConfigurationError(RuntimeError):
@@ -43,6 +44,7 @@ class Settings:
     db_path: str
     ffmpeg_path: str
     keep_downloads: bool = False
+    log_level: str = "INFO"
 
     @classmethod
     def from_env(cls, env: Optional[Mapping[str, str]] = None) -> "Settings":
@@ -55,7 +57,8 @@ class Settings:
                 loading without touching real environment variables.
 
         Raises:
-            ConfigurationError: if a required variable is missing or blank.
+            ConfigurationError: if a required variable is missing or blank,
+                or if LOG_LEVEL is set to something that isn't a log level.
         """
         env = os.environ if env is None else env
 
@@ -72,6 +75,12 @@ class Settings:
         keep_downloads = (
             (env.get("KEEP_DOWNLOADS") or "").strip().lower() in _TRUE_VALUES
         )
+        log_level = (env.get("LOG_LEVEL") or "").strip().upper() or "INFO"
+        if log_level not in _VALID_LOG_LEVELS:
+            raise ConfigurationError(
+                f"LOG_LEVEL must be one of {sorted(_VALID_LOG_LEVELS)}, "
+                f"got {log_level!r}."
+            )
 
         return cls(
             bot_token=bot_token,
@@ -79,6 +88,7 @@ class Settings:
             db_path=db_path,
             ffmpeg_path=ffmpeg_path,
             keep_downloads=keep_downloads,
+            log_level=log_level,
         )
 
 

@@ -8,6 +8,7 @@ import shutil
 from telegram.ext import Application
 
 from bot.handlers import register_handlers
+from config.logging_setup import configure_logging
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -29,10 +30,7 @@ def check_ffmpeg(ffmpeg_path: str) -> None:
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    configure_logging(settings.bot_token, settings.log_level)
 
     check_ffmpeg(settings.ffmpeg_path)
 
